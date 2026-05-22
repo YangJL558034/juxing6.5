@@ -1,0 +1,101 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { query, db } from '@/lib/database';
+
+// 员工查询（免登录，通过姓名+身份证验证）
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const name = searchParams.get('name');
+    const idCard = searchParams.get('idCard');
+
+    if (!name || !name.trim()) {
+      return NextResponse.json({ success: false, error: '请输入姓名' });
+    }
+
+    if (!idCard || !idCard.trim()) {
+      return NextResponse.json({ success: false, error: '请输入身份证号' });
+    }
+
+    // 必须通过姓名+身份证精确匹配
+    const employee = query.getEmployeeByNameAndIdCard.get(name.trim(), idCard.trim()) as {
+      id: number;
+      name: string;
+      id_card: string;
+      phone: string;
+      department: string;
+      position: string;
+      base_salary: number;
+      status: string;
+      location?: string;
+    } | undefined;
+
+    if (!employee) {
+      return NextResponse.json({ 
+        success: false, 
+        error: '员工信息验证失败，请确认姓名和身份证号是否正确' 
+      });
+    }
+
+    // 检查员工是否已离职
+    if (employee.status === '离职') {
+      return NextResponse.json({ 
+        success: false, 
+        error: '该员工已离职，无法查询' 
+      });
+    }
+
+    // 获取工时记录（月度汇总）- 作为工资记录返回
+    const monthlyRecords = query.getWorkHoursMonthlyByEmployee.all(employee.id) as any[];
+    
+    // 从 work_hours_monthly.details 解析打卡记录
+    let attendanceRecords: any[] = [];
+    for (const record of monthlyRecords) {
+      if (record.details) {
+        try {
+          const details = JSON.parse(record.details);
+          const year = record.year;
+          const month = record.month_num;
+          
+          // details 格式: { "1": "08:00\n12:02\n13:22", "2": "07:57\n12:02" }
+          for (const [day, times] of Object.entries(details)) {
+            const timeList = String(times).split('\n').filter(t => t.trim());
+            for (const time of timeList) {
+              attendanceRecords.push({
+                employee_id: employee.id,
+                employee_name: employee.name,
+                date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+                time: time.trim(),
+                year,
+                month
+              });
+            }
+          }
+        } catch (e) {
+          // 解析失败，跳过
+        }
+      }
+    }
+    
+    // 按日期和时间排序
+    attendanceRecords.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.time.localeCompare(b.time);
+    });
+
+    return NextResponse.json({ 
+      success: true, 
+      employee,
+      workRecords: [],
+      salaryRecords: monthlyRecords || [],
+      monthlyRecords: monthlyRecords || [],
+      attendanceRecords: attendanceRecords
+    });
+  } catch (error) {
+    console.error('Query employee error:', error);
+    return NextResponse.json({ error: '查询失败' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  return GET(request);
+}
