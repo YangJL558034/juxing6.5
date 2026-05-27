@@ -82,12 +82,18 @@ export async function GET(request: NextRequest) {
       return a.time.localeCompare(b.time);
     });
 
+    // 用员工表的部门信息覆盖工资记录的部门信息（工资表部门可能为空）
+    const salaryRecordsWithDept = (monthlyRecords || []).map((record: any) => ({
+      ...record,
+      department: employee.department || record.department || ''
+    }));
+
     return NextResponse.json({ 
       success: true, 
       employee,
       workRecords: [],
-      salaryRecords: monthlyRecords || [],
-      monthlyRecords: monthlyRecords || [],
+      salaryRecords: salaryRecordsWithDept,
+      monthlyRecords: salaryRecordsWithDept,
       attendanceRecords: attendanceRecords
     });
   } catch (error) {

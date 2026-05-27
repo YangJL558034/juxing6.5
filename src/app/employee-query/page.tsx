@@ -904,10 +904,6 @@ export default function EmployeeQueryPage() {
                                 <span className="text-slate-800">{record.id}</span>
                               </div>
                               <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">代码</span>
-                                <span className="text-slate-800">{record.employee_code || '-'}</span>
-                              </div>
-                              <div className="flex justify-between text-sm">
                                 <span className="text-slate-500">部门</span>
                                 <span className="text-slate-800">{record.department || '-'}</span>
                               </div>
@@ -1024,6 +1020,18 @@ export default function EmployeeQueryPage() {
                                   <div className="flex justify-between text-sm">
                                     <span className="text-slate-500">交通补贴</span>
                                     <span className="text-blue-600 font-medium">¥{(record.transport_subsidy ?? 0).toLocaleString()}</span>
+                                  </div>
+                                )}
+                                {(record.position_subsidy ?? 0) > 0 && (
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-slate-500">岗位补贴</span>
+                                    <span className="text-blue-600 font-medium">¥{(record.position_subsidy ?? 0).toLocaleString()}</span>
+                                  </div>
+                                )}
+                                {(record.living_subsidy ?? 0) > 0 && (
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-slate-500">生活补贴</span>
+                                    <span className="text-blue-600 font-medium">¥{(record.living_subsidy ?? 0).toLocaleString()}</span>
                                   </div>
                                 )}
                                 {(record.other_subsidy ?? 0) > 0 && (
