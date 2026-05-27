@@ -1075,6 +1075,18 @@ export default function EmployeeQueryPage() {
                                     <span className="text-red-500">¥{record.social_pension_adj?.toLocaleString() ?? "0"}</span>
                                   </div>
                                 )}
+                                {(record.fine ?? 0) > 0 && (
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-slate-500">扣款</span>
+                                    <span className="text-red-500">¥{(record.fine ?? 0).toLocaleString()}</span>
+                                  </div>
+                                )}
+                                {(record.other_deduction ?? 0) > 0 && (
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-slate-500">其他扣款</span>
+                                    <span className="text-red-500">¥{(record.other_deduction ?? 0).toLocaleString()}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
