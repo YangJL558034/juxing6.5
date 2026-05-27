@@ -1346,7 +1346,7 @@ export default function SalaryPage() {
                         <TableHead rowSpan={2} className="align-middle text-right">住房补贴</TableHead>
                         <TableHead rowSpan={2} className="align-middle text-right">交通补贴</TableHead>
                         <TableHead rowSpan={2} className="align-middle text-right">补贴</TableHead>
-                        <TableHead rowSpan={2} className="align-middle text-right">罚款</TableHead>
+                        <TableHead rowSpan={2} className="align-middle text-right">扣款</TableHead>
                         <TableHead rowSpan={2} className="align-middle text-right">其他扣款</TableHead>
                         <TableHead rowSpan={2} className="align-middle text-right">水电费</TableHead>
                         <TableHead rowSpan={2} className="align-middle text-right">应领工资</TableHead>
