@@ -47,6 +47,7 @@ const assetTypes = [
   { value: '大疆设备', label: '大疆设备' },
   { value: '扫码枪', label: '扫码枪' },
   { value: '空调遥控器', label: '空调遥控器' },
+  { value: '自定义', label: '自定义' },
 ];
 
 interface AssetConfig {
@@ -88,6 +89,7 @@ export function AssetsPage() {
   const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
   const [scrapAssetId, setScrapAssetId] = useState<number | null>(null);
   const [scrapConfirmer, setScrapConfirmer] = useState('');
+  const [customAssetType, setCustomAssetType] = useState('');
   
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -217,13 +219,19 @@ export function AssetsPage() {
     if (!newAsset.name || !newAsset.department || !newAsset.value) {
       return;
     }
+    
+    // 如果选择自定义类型，则使用自定义类型名称
+    const assetType = newAsset.type === '自定义' && customAssetType ? customAssetType : newAsset.type;
+    if (newAsset.type === '自定义' && !customAssetType) {
+      return;
+    }
 
     try {
       const method = editingAsset ? 'PUT' : 'POST';
       const body = editingAsset 
         ? {
             id: editingAsset.id,
-            type: newAsset.type,
+            type: assetType,
             name: newAsset.name,
             department: newAsset.department,
             user: newAsset.user || null,
@@ -233,7 +241,7 @@ export function AssetsPage() {
             config: newAsset.config,
           }
         : {
-            type: newAsset.type,
+            type: assetType,
             name: newAsset.name,
             department: newAsset.department,
             user: newAsset.user || null,
@@ -261,6 +269,7 @@ export function AssetsPage() {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingAsset(null);
+    setCustomAssetType('');
     setNewAsset({
       name: '',
       type: '电脑',
@@ -735,21 +744,36 @@ export function AssetsPage() {
                   <Label htmlFor="type" className="text-right">
                     资产类型 <span className="text-red-500">*</span>
                   </Label>
-                  <Select
-                    value={newAsset.type}
-                    onValueChange={(value) => setNewAsset({ ...newAsset, type: value, config: {} })}
-                  >
-                    <SelectTrigger className="col-span-3">
-                      <SelectValue placeholder="选择资产类型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assetTypes.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {newAsset.type === '自定义' ? (
+                    <Input
+                      id="customType"
+                      value={customAssetType}
+                      onChange={(e) => setCustomAssetType(e.target.value)}
+                      placeholder="请输入自定义资产类型"
+                      className="col-span-3"
+                    />
+                  ) : (
+                    <Select
+                      value={newAsset.type}
+                      onValueChange={(value) => {
+                        setNewAsset({ ...newAsset, type: value, config: {} });
+                        if (value === '自定义') {
+                          setCustomAssetType('');
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue placeholder="选择资产类型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assetTypes.map((type) => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="name" className="text-right">
