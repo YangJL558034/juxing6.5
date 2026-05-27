@@ -1135,12 +1135,7 @@ export default function EmployeeQueryPage() {
                                     <span className="text-red-500">¥{(record.deduct_utilities ?? 0).toLocaleString()}</span>
                                   </div>
                                 )}
-                                {(record.total_deduction ?? 0) > 0 && (
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-slate-500">应扣合计</span>
-                                    <span className="text-red-500">¥{(record.total_deduction ?? 0).toLocaleString()}</span>
-                                  </div>
-                                )}
+
                                 {(record.deduct_social_security ?? 0) !== 0 && (
                                   <div className="flex justify-between text-sm">
                                     <span className="text-slate-500">社保扣款</span>
