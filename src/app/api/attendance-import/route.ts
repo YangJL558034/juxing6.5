@@ -5,67 +5,144 @@ import { existsSync } from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
 
-// 解析打卡记录Excel并导入
+type CellValue = string | number | boolean | Date | null | undefined;
+
+type AttendanceRecord = {
+  employeeId: string;
+  name: string;
+  department: string;
+  year: number;
+  month: number;
+  attendance: Record<string, string>;
+};
+
+type LocationKey = 'office' | 'workshop';
+
+type TemplateKind = 'office' | 'workshop' | 'legacy';
+
+type EmployeeRow = {
+  id: number;
+  name: string;
+  department?: string | null;
+  status?: string | null;
+  location?: string | null;
+};
+
+type MonthlyRecordRow = {
+  id: number;
+};
+
+type ImportResult = {
+  importedEmployees: number;
+  importedPunchDays: number;
+  importedPunchTimes: number;
+  skippedMissing: number;
+  skippedIneligible: number;
+  employees: Array<{ id: number; name: string; department: string; location: string }>;
+  records: Array<{
+    name: string;
+    employeeId: string;
+    department: string;
+    year: number;
+    month: number;
+    normalHours: number;
+    overtimeHours: number;
+    workDays: number;
+    punchDays: number;
+    punchTimes: number;
+  }>;
+  skipped: Array<{ name: string; reason: string; status?: string; location?: string }>;
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { filePath: inputFilePath, location } = body;
-    
+
     console.log('[Attendance Import] 收到导入请求:', { filePath: inputFilePath, location });
-    
+
     if (!inputFilePath || !existsSync(inputFilePath)) {
       console.error('[Attendance Import] 文件不存在:', inputFilePath);
       return NextResponse.json({ error: '文件不存在' }, { status: 400 });
     }
-    
-    // 读取 Excel 文件
+
+    const fileName = path.basename(inputFilePath);
     const fileBuffer = await readFile(inputFilePath);
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-    
-    // 获取第一个工作表
-    const sheetName = workbook.SheetNames[0];
+    const templateKind = detectTemplateKind(workbook);
+    const locationKey = resolveLocationKey(location, fileName, templateKind);
+    const importLocation = displayLocation(locationKey);
+    const sheetName = templateKind === 'workshop' && workbook.SheetNames.includes('考勤记录')
+      ? '考勤记录'
+      : workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
-    // 转换为 JSON 数据
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
-    
-    // 从文件名或内容提取年月
-    let year = new Date().getFullYear();
-    let month = new Date().getMonth() + 1;
-    
-    // 先从文件名提取
-    const fileName = path.basename(inputFilePath);
-    const fileNameYearMonthMatch = fileName.match(/(\d{4})年?(\d{1,2})月?/);
-    if (fileNameYearMonthMatch) {
-      year = parseInt(fileNameYearMonthMatch[1]);
-      month = parseInt(fileNameYearMonthMatch[2]);
+
+    if (!worksheet) {
+      return NextResponse.json({ error: '未找到可导入的工作表' }, { status: 400 });
     }
-    
-    // 解析打卡记录
-    const records = parseExcelAttendance(jsonData, year, month);
-    
-    if (records.length === 0) {
-      return NextResponse.json({ 
-        error: '未能解析到打卡记录，请检查文件格式',
+
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: '',
+      raw: false,
+    }) as CellValue[][];
+
+    const defaults = extractYearMonth(fileName, jsonData);
+    if (!defaults) {
+      return NextResponse.json({
+        error: '未识别打卡月份，请检查文件名或考勤日期是否包含年份和月份',
         sheetName,
-        rowCount: jsonData.length
       }, { status: 400 });
     }
-    
-    // 导入数据
-    const result = await importAttendanceRecords(records, location || '办公室');
-    
+
+    const records = parseExcelAttendance(jsonData, defaults.year, defaults.month, templateKind);
+
+    if (records.length === 0) {
+      return NextResponse.json({
+        error: '未能解析到打卡记录，请检查文件格式',
+        sheetName,
+        rowCount: jsonData.length,
+      }, { status: 400 });
+    }
+
+    const result = importAttendanceRecords(records, locationKey);
+
+    if (result.importedEmployees === 0) {
+      return NextResponse.json({
+        error: `未导入任何员工：员工管理中没有匹配的${importLocation}在职员工`,
+        data: {
+          year: defaults.year,
+          month: defaults.month,
+          location: importLocation,
+          sheetName,
+          parsed: records.length,
+          imported: 0,
+          skippedMissing: result.skippedMissing,
+          skippedIneligible: result.skippedIneligible,
+          skipped: result.skipped,
+        },
+      }, { status: 400 });
+    }
+
     return NextResponse.json({
       success: true,
-      message: `成功导入 ${result.createdEmployees} 名员工，${result.createdRecords} 条打卡记录`,
+      message: `成功导入 ${result.importedEmployees} 名${importLocation}在职员工，${result.importedPunchDays} 天打卡记录，${result.importedPunchTimes} 个打卡时间；跳过 ${result.skippedMissing + result.skippedIneligible} 名`,
       data: {
-        year,
-        month,
-        location: location || '办公室',
-        total: records.length,
+        year: defaults.year,
+        month: defaults.month,
+        location: importLocation,
+        sheetName,
+        parsed: records.length,
+        imported: result.importedEmployees,
+        punchDays: result.importedPunchDays,
+        punchTimes: result.importedPunchTimes,
+        skippedMissing: result.skippedMissing,
+        skippedIneligible: result.skippedIneligible,
+        total: result.importedEmployees,
         employees: result.employees,
-        records: result.records
-      }
+        records: result.records,
+        skipped: result.skipped,
+      },
     });
   } catch (error) {
     console.error('Import attendance error:', error);
@@ -73,327 +150,495 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// 解析 Excel 中的打卡数据 - 支持员工刷卡记录表格式
-function parseExcelAttendance(data: any[][], defaultYear: number, defaultMonth: number) {
-  const records: any[] = [];
-  let year = defaultYear;
-  let month = defaultMonth;
-  
-  if (data.length < 5) return records;
-  
-  // 查找考勤日期行
-  for (let i = 0; i < Math.min(10, data.length); i++) {
-    const rowStr = (data[i] as any[]).join('');
-    // 匹配 "考勤日期：2026-04-01～2026-04-30" 格式
-    const dateMatch = rowStr.match(/考勤日期[：:]\s*(\d{4})-(\d{2})-\d{2}/);
-    if (dateMatch) {
-      year = parseInt(dateMatch[1]);
-      month = parseInt(dateMatch[2]);
-      break;
-    }
-    // 也尝试匹配其他年月格式
-    const yearMonthMatch = rowStr.match(/(\d{4})年?(\d{1,2})月?/);
-    if (yearMonthMatch) {
-      year = parseInt(yearMonthMatch[1]);
-      month = parseInt(yearMonthMatch[2]);
+function detectTemplateKind(workbook: XLSX.WorkBook): TemplateKind {
+  if (workbook.SheetNames.includes('考勤记录')) {
+    return 'workshop';
+  }
+
+  const firstSheetName = workbook.SheetNames[0] || '';
+  const firstSheet = workbook.Sheets[firstSheetName];
+  if (firstSheetName.includes('员工刷卡记录表') || firstSheetName.includes('刷卡')) {
+    return 'office';
+  }
+
+  if (firstSheet) {
+    const preview = XLSX.utils.sheet_to_json(firstSheet, {
+      header: 1,
+      defval: '',
+      raw: false,
+      range: 0,
+    }) as CellValue[][];
+    const text = preview.slice(0, 10).map((row) => row.map(cellText).join('')).join('');
+    if (text.includes('员工刷卡记录表')) {
+      return 'office';
     }
   }
-  
-  // 解析员工记录 - 格式：每3行为一个员工
-  // 第N行：工号：, , 1, , 姓名：, 张, 部门：, 财务部
-  // 第N+1行：1, 2, 3, ..., 30 (日期列头)
-  // 第N+2行：每日打卡时间
-  
-  for (let i = 4; i < data.length - 2; i++) {
-    const row = data[i] as any[];
-    if (!row || !Array.isArray(row)) continue;
-    
-    const rowStr = row.join('');
-    
-    // 查找包含"工号："或"姓名："的行 - 这是员工信息行
-    if (rowStr.includes('工号') || rowStr.includes('姓名')) {
-      // 提取工号
-      let employeeId = '';
-      let name = '';
-      let department = '';
-      
-      for (let j = 0; j < row.length; j++) {
-        const cell = String(row[j] || '').trim();
-        
-        // 找到"工号："后面的数字
-        if (cell.includes('工号')) {
-          // 工号在后面几列
-          for (let k = j + 1; k < Math.min(j + 4, row.length); k++) {
-            const nextCell = String(row[k] || '').trim();
-            if (/^\d+$/.test(nextCell) && nextCell.length <= 10) {
-              employeeId = nextCell;
-              break;
-            }
-          }
-        }
-        
-        // 找到"姓名："后面的名字
-        if (cell.includes('姓名')) {
-          for (let k = j + 1; k < Math.min(j + 4, row.length); k++) {
-            const nextCell = String(row[k] || '').trim();
-            if (/^[\u4e00-\u9fa5]{2,4}$/.test(nextCell)) {
-              name = nextCell;
-              break;
-            }
-          }
-        }
-        
-        // 找到"部门："后面的部门名
-        if (cell.includes('部门')) {
-          for (let k = j + 1; k < Math.min(j + 4, row.length); k++) {
-            const nextCell = String(row[k] || '').trim();
-            if (nextCell && /^[\u4e00-\u9fa5]+$/.test(nextCell) && nextCell.length >= 2 && nextCell.length <= 6) {
-              department = nextCell;
-              break;
-            }
-          }
-        }
-      }
-      
-      // 如果没有找到姓名，跳过
-      if (!name) continue;
-      
-      // 检查下一行是否是日期行（包含1-30的数字）
-      const nextRow = data[i + 1] as any[];
-      let dateStartCol = -1;
-      
-      if (nextRow && Array.isArray(nextRow)) {
-        // 查找日期列起始位置（找数字1）
-        for (let j = 0; j < nextRow.length; j++) {
-          if (String(nextRow[j]) === '1') {
-            dateStartCol = j;
-            break;
-          }
-        }
-      }
-      
-      // 读取打卡数据行
-      const dataRow = data[i + 2] as any[];
-      if (!dataRow || !Array.isArray(dataRow)) continue;
-      
-      // 解析每日打卡记录
-      const attendance: { [day: number]: string } = {};
-      
-      if (dateStartCol >= 0) {
-        for (let j = dateStartCol; j < dataRow.length && (j - dateStartCol + 1) <= 31; j++) {
-          const day = j - dateStartCol + 1;
-          const cell = String(dataRow[j] || '').trim();
-          if (cell && cell !== '-') {
-            attendance[day] = cell;
-          }
-        }
-      }
-      
-      if (Object.keys(attendance).length > 0) {
-        records.push({ 
-          employeeId, 
-          name, 
-          department: department || '办公室', 
-          year, 
-          month, 
-          attendance 
-        });
-      }
-      
-      // 跳过已处理的两行
-      i += 2;
-    }
-  }
-  
-  return records;
+
+  return 'legacy';
 }
 
-// 导入打卡记录到数据库
-async function importAttendanceRecords(records: any[], location: string) {
-  let createdEmployees = 0;
-  let createdRecords = 0;
-  const employees: any[] = [];
-  const recordDetails: any[] = [];
-  
-  for (const record of records) {
-    // 查找员工（不自动创建，只导入已存在的员工）
-    const employee = db.prepare('SELECT * FROM employees WHERE name = ?').get(record.name) as any;
-    
-    if (!employee) {
-      // 员工不存在，跳过此条记录
-      console.log(`跳过: 员工 "${record.name}" 不在员工列表中`);
-      continue;
-    }
-    
-    employees.push({ 
-      id: employee.id, 
-      name: record.name, 
-      department: record.department || '办公室'
-    });
-    
-    // 计算工时统计
-    let normalHours = 0;
-    let overtimeHours = 0;
-    let workDays = 0;
-    
-    for (const [day, value] of Object.entries(record.attendance)) {
-      const val = String(value);
-      // 解析打卡时间，计算工时
-      // 格式可能是: "08:30\n11:37\n..." 多个时间用换行分隔
-      // 或者 "09:00-18:00" 时间范围
-      // 或者 "8" 直接工时数字
-      // 或者 "√" 打勾
-      
-      if (val.includes('\n')) {
-        // 多个打卡时间，计算工作时间
-        const times = val.split('\n').map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t));
-        if (times.length >= 2) {
-          // 取第一个时间作为上班时间，最后一个作为下班时间
-          const startTime = parseTime(times[0]);
-          const endTime = parseTime(times[times.length - 1]);
-          if (startTime && endTime) {
-            let hours = (endTime - startTime) / 60;
-            
-            // 减去午休时间（12:00-13:30 = 1.5小时）
-            if (hours > 4) {
-              hours -= 1.5;
-            }
-            
-            if (hours > 0) {
-              workDays++;
-              if (hours <= 8) {
-                normalHours += hours;
-              } else {
-                normalHours += 8;
-                overtimeHours += (hours - 8);
-              }
-            }
-          }
-        }
-      } else if (val.includes('-')) {
-        // 时间范围格式 "09:00-18:00"
-        const times = val.split('-');
-        if (times.length === 2) {
-          const start = parseTime(times[0]);
-          const end = parseTime(times[1]);
-          if (start && end) {
-            let hours = (end - start) / 60;
-            if (hours > 4) {
-              hours -= 1.5; // 减去午休
-            }
-            if (hours > 0) {
-              workDays++;
-              if (hours <= 8) {
-                normalHours += hours;
-              } else {
-                normalHours += 8;
-                overtimeHours += (hours - 8);
-              }
-            }
-          }
-        }
-      } else if (/^\d+(\.\d+)?$/.test(val)) {
-        // 直接是工时数字
-        const hours = parseFloat(val);
-        workDays++;
-        if (hours <= 8) {
-          normalHours += hours;
-        } else {
-          normalHours += 8;
-          overtimeHours += (hours - 8);
-        }
-      } else if (val === '√' || val === 'v' || val === 'V') {
-        // 打勾表示正常出勤
-        workDays++;
-        normalHours += 8;
-      }
-    }
-    
-    // 检查是否已存在该月份的记录
-    const existing = query.getWorkHoursMonthlyByYearMonth.all(record.year, record.month) as any[];
-    const existingRecord = existing.find((r: any) => r.employee_id === employee.id);
-    
-    const monthStr = `${record.year}-${String(record.month).padStart(2, '0')}`;
-    
-    if (existingRecord) {
-      // 更新记录 - 只更新工时数据，不修改工资数据
-      db.prepare(`
-        UPDATE work_hours_monthly SET 
-          employee_name = ?, normal_hours = ?, weekday_overtime = ?,
-          work_hours = ?, overtime_hours = ?, total_days = ?,
-          details = ?
-        WHERE id = ?
-      `).run(
-        record.name, normalHours, overtimeHours,
-        normalHours + overtimeHours, overtimeHours, workDays,
-        JSON.stringify(record.attendance),
-        existingRecord.id
-      );
-    } else {
-      // 创建新记录 - 只保存工时数据，工资为0（需要单独导入工资条）
-      query.createWorkHoursMonthly.run(
-        employee.id,
-        monthStr,
-        workDays,
-        normalHours + overtimeHours,
-        overtimeHours,
-        0, // weekend_overtime
-        JSON.stringify(record.attendance), // details
-        record.name,
-        record.year,
-        record.month,
-        normalHours,
-        overtimeHours,
-        0, // base_salary - 工资需要单独导入
-        0, // normal_pay
-        0, // weekday_overtime_pay
-        0, // weekend_overtime_pay
-        0, // total_payable
-        0, // deduction
-        0, // actual_amount
-        location
-      );
-    }
-    
-    createdRecords++;
-    recordDetails.push({
-      name: record.name,
-      employeeId: record.employeeId,
-      department: record.department,
-      year: record.year,
-      month: record.month,
-      normalHours: Math.round(normalHours * 10) / 10,
-      overtimeHours: Math.round(overtimeHours * 10) / 10,
-      workDays
-    });
+function resolveLocationKey(input: unknown, fileName: string, templateKind: TemplateKind): LocationKey {
+  if (templateKind === 'office' || templateKind === 'workshop') {
+    return templateKind;
   }
-  
-  return { createdEmployees, createdRecords, employees, records: recordDetails };
+
+  const value = typeof input === 'string' ? input.trim() : '';
+  if (value === '办公室' || value === 'office') {
+    return 'office';
+  }
+  if (value === '车间' || value === 'workshop') {
+    return 'workshop';
+  }
+  return fileName.includes('车间') ? 'workshop' : 'office';
 }
 
-// 解析时间字符串为分钟数
-function parseTime(timeStr: string): number | null {
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (match) {
-    return parseInt(match[1]) * 60 + parseInt(match[2]);
+function displayLocation(locationKey: LocationKey) {
+  return locationKey === 'office' ? '办公室' : '车间';
+}
+
+function locationAliases(locationKey: LocationKey): [string, string] {
+  return locationKey === 'office' ? ['office', '办公室'] : ['workshop', '车间'];
+}
+
+function extractYearMonth(fileName: string, data: CellValue[][]) {
+  const fromName = fileName.match(/(\d{4})年\s*(\d{1,2})月?/);
+  if (fromName) {
+    return { year: parseInt(fromName[1], 10), month: parseInt(fromName[2], 10) };
   }
+
+  const fromCompactName = fileName.match(/(20\d{2})(0[1-9]|1[0-2])月?/);
+  if (fromCompactName) {
+    return { year: parseInt(fromCompactName[1], 10), month: parseInt(fromCompactName[2], 10) };
+  }
+
+  for (const row of data.slice(0, 20)) {
+    const rowText = row.map(cellText).join(' ');
+    const fromDateRange = rowText.match(/(\d{4})-(\d{1,2})-\d{1,2}/);
+    if (fromDateRange) {
+      return {
+        year: parseInt(fromDateRange[1], 10),
+        month: parseInt(fromDateRange[2], 10),
+      };
+    }
+
+    const fromText = rowText.match(/(\d{4})年\s*(\d{1,2})月?/);
+    if (fromText) {
+      return { year: parseInt(fromText[1], 10), month: parseInt(fromText[2], 10) };
+    }
+
+    const fromCompactText = rowText.match(/(20\d{2})(0[1-9]|1[0-2])月?/);
+    if (fromCompactText) {
+      return { year: parseInt(fromCompactText[1], 10), month: parseInt(fromCompactText[2], 10) };
+    }
+  }
+
   return null;
 }
 
-// 获取打卡记录
+function parseExcelAttendance(data: CellValue[][], year: number, month: number, templateKind: TemplateKind) {
+  if (templateKind === 'workshop') {
+    return parseWorkshopAttendanceSheet(data, year, month);
+  }
+  if (templateKind === 'office') {
+    return parseOfficeSwipeSheet(data, year, month);
+  }
+
+  const officeRows = parseOfficeSwipeSheet(data, year, month);
+  return officeRows.length > 0 ? officeRows : parseWorkshopAttendanceSheet(data, year, month);
+}
+
+function parseWorkshopAttendanceSheet(data: CellValue[][], year: number, month: number) {
+  const records: AttendanceRecord[] = [];
+  const dayHeaderIndex = data.findIndex((row) => getDayColumns(row).size >= 15);
+  if (dayHeaderIndex < 0) {
+    return records;
+  }
+
+  const dayColumns = getDayColumns(data[dayHeaderIndex]);
+
+  for (let i = dayHeaderIndex + 1; i < data.length - 1; i++) {
+    const infoRow = data[i];
+    if (!isEmployeeInfoRow(infoRow)) {
+      continue;
+    }
+
+    const name = findLabeledValue(infoRow, '姓名');
+    if (!name) {
+      continue;
+    }
+
+    const employeeId = findLabeledValue(infoRow, '工号');
+    const department = findLabeledValue(infoRow, '部门') || '';
+    const punchRow = data[i + 1] || [];
+    const attendance: Record<string, string> = {};
+
+    for (const [columnIndex, day] of dayColumns.entries()) {
+      const times = extractPunchTimes(cellText(punchRow[columnIndex]));
+      if (times.length > 0) {
+        attendance[String(day)] = times.join('\n');
+      }
+    }
+
+    if (Object.keys(attendance).length > 0) {
+      records.push({
+        employeeId,
+        name,
+        department,
+        year,
+        month,
+        attendance,
+      });
+    }
+  }
+
+  return records;
+}
+
+function parseOfficeSwipeSheet(data: CellValue[][], year: number, month: number) {
+  const records: AttendanceRecord[] = [];
+
+  for (let i = 0; i < data.length - 2; i++) {
+    const infoRow = data[i];
+    if (!isEmployeeInfoRow(infoRow)) {
+      continue;
+    }
+
+    const dayColumns = getDayColumns(data[i + 1]);
+    if (dayColumns.size === 0) {
+      continue;
+    }
+
+    const name = findLabeledValue(infoRow, '姓名');
+    if (!name) {
+      continue;
+    }
+
+    const employeeId = findLabeledValue(infoRow, '工号');
+    const department = findLabeledValue(infoRow, '部门') || '';
+    const punchRow = data[i + 2] || [];
+    const attendance: Record<string, string> = {};
+
+    for (const [columnIndex, day] of dayColumns.entries()) {
+      const times = extractPunchTimes(cellText(punchRow[columnIndex]));
+      if (times.length > 0) {
+        attendance[String(day)] = times.join('\n');
+      }
+    }
+
+    if (Object.keys(attendance).length > 0) {
+      records.push({
+        employeeId,
+        name,
+        department,
+        year,
+        month,
+        attendance,
+      });
+      i += 2;
+    }
+  }
+
+  return records;
+}
+
+function getDayColumns(row: CellValue[] = []) {
+  const columns = new Map<number, number>();
+  row.forEach((cell, index) => {
+    const value = cellText(cell);
+    if (/^\d{1,2}$/.test(value)) {
+      const day = parseInt(value, 10);
+      if (day >= 1 && day <= 31) {
+        columns.set(index, day);
+      }
+    }
+  });
+  return columns;
+}
+
+function isEmployeeInfoRow(row: CellValue[] = []) {
+  const normalized = normalizeText(row.map(cellText).join(''));
+  return normalized.includes('工号') && normalized.includes('姓名');
+}
+
+function findLabeledValue(row: CellValue[], label: '工号' | '姓名' | '部门') {
+  for (let i = 0; i < row.length; i++) {
+    if (!normalizeText(cellText(row[i])).includes(label)) {
+      continue;
+    }
+
+    for (let j = i + 1; j < Math.min(i + 8, row.length); j++) {
+      const value = cellText(row[j]);
+      if (value && !isInfoLabel(value)) {
+        return value;
+      }
+    }
+  }
+  return '';
+}
+
+function isInfoLabel(value: string) {
+  const normalized = normalizeText(value);
+  return ['工号', '姓名', '部门', '日期', '制表时间', '考勤时间'].some((label) => normalized.includes(label));
+}
+
+function extractPunchTimes(value: string) {
+  const matches = value.replace(/：/g, ':').match(/\d{1,2}:\d{2}/g) || [];
+  const seen = new Set<string>();
+  const times: string[] = [];
+
+  for (const match of matches) {
+    const parsed = parseTime(match);
+    if (parsed === null) {
+      continue;
+    }
+
+    const normalized = formatMinutes(parsed);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      times.push(normalized);
+    }
+  }
+
+  return times.sort();
+}
+
+function importAttendanceRecords(records: AttendanceRecord[], locationKey: LocationKey): ImportResult {
+  let importedEmployees = 0;
+  let importedPunchDays = 0;
+  let importedPunchTimes = 0;
+  let skippedMissing = 0;
+  let skippedIneligible = 0;
+  const employees: ImportResult['employees'] = [];
+  const recordDetails: ImportResult['records'] = [];
+  const skipped: ImportResult['skipped'] = [];
+
+  const importLocation = displayLocation(locationKey);
+  const aliases = locationAliases(locationKey);
+  const getEligibleEmployee = db.prepare(`
+    SELECT * FROM employees
+    WHERE name = ? AND location IN (?, ?) AND status = '在职'
+    LIMIT 1
+  `);
+  const getEmployeeByName = db.prepare('SELECT * FROM employees WHERE name = ? LIMIT 1');
+  const getExistingMonthlyRecord = db.prepare(`
+    SELECT * FROM work_hours_monthly
+    WHERE employee_id = ? AND year = ? AND month_num = ?
+    LIMIT 1
+  `);
+  const updateMonthlyRecord = db.prepare(`
+    UPDATE work_hours_monthly SET
+      employee_name = ?,
+      normal_hours = ?,
+      weekday_overtime = ?,
+      work_hours = ?,
+      overtime_hours = ?,
+      total_days = ?,
+      details = ?,
+      location = ?
+    WHERE id = ?
+  `);
+
+  for (const record of records) {
+    const employee = getEligibleEmployee.get(record.name, aliases[0], aliases[1]) as EmployeeRow | undefined;
+
+    if (!employee) {
+      const existingEmployee = getEmployeeByName.get(record.name) as EmployeeRow | undefined;
+      if (existingEmployee) {
+        skippedIneligible++;
+        skipped.push({
+          name: record.name,
+          reason: `员工不是${importLocation}在职员工`,
+          status: existingEmployee.status ?? undefined,
+          location: existingEmployee.location ?? undefined,
+        });
+      } else {
+        skippedMissing++;
+        skipped.push({ name: record.name, reason: '员工管理中不存在该员工' });
+      }
+      continue;
+    }
+
+    const calculated = calculateAttendanceHours(record.attendance);
+    const monthStr = `${record.year}-${String(record.month).padStart(2, '0')}`;
+    const details = JSON.stringify(record.attendance);
+    const existingRecord = getExistingMonthlyRecord.get(employee.id, record.year, record.month) as MonthlyRecordRow | undefined;
+
+    if (existingRecord) {
+      updateMonthlyRecord.run(
+        record.name,
+        calculated.normalHours,
+        calculated.overtimeHours,
+        calculated.normalHours + calculated.overtimeHours,
+        calculated.overtimeHours,
+        calculated.workDays,
+        details,
+        importLocation,
+        existingRecord.id,
+      );
+    } else {
+      query.createWorkHoursMonthly.run(
+        employee.id,
+        monthStr,
+        calculated.workDays,
+        calculated.normalHours + calculated.overtimeHours,
+        calculated.overtimeHours,
+        0,
+        details,
+        record.name,
+        record.year,
+        record.month,
+        calculated.normalHours,
+        calculated.overtimeHours,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        importLocation,
+      );
+    }
+
+    importedEmployees++;
+    importedPunchDays += calculated.punchDays;
+    importedPunchTimes += calculated.punchTimes;
+    employees.push({
+      id: employee.id,
+      name: record.name,
+      department: employee.department || record.department || '',
+      location: importLocation,
+    });
+    recordDetails.push({
+      name: record.name,
+      employeeId: record.employeeId,
+      department: employee.department || record.department || '',
+      year: record.year,
+      month: record.month,
+      normalHours: roundHours(calculated.normalHours),
+      overtimeHours: roundHours(calculated.overtimeHours),
+      workDays: calculated.workDays,
+      punchDays: calculated.punchDays,
+      punchTimes: calculated.punchTimes,
+    });
+  }
+
+  return {
+    importedEmployees,
+    importedPunchDays,
+    importedPunchTimes,
+    skippedMissing,
+    skippedIneligible,
+    employees,
+    records: recordDetails,
+    skipped,
+  };
+}
+
+function calculateAttendanceHours(attendance: Record<string, string>) {
+  let normalHours = 0;
+  let overtimeHours = 0;
+  let workDays = 0;
+  let punchDays = 0;
+  let punchTimes = 0;
+
+  for (const value of Object.values(attendance)) {
+    const times = extractPunchTimes(value);
+    if (times.length === 0) {
+      continue;
+    }
+
+    punchDays++;
+    punchTimes += times.length;
+
+    if (times.length < 2) {
+      continue;
+    }
+
+    const startTime = parseTime(times[0]);
+    const endTime = parseTime(times[times.length - 1]);
+    if (startTime === null || endTime === null) {
+      continue;
+    }
+
+    let minutes = endTime - startTime;
+    if (minutes < 0) {
+      minutes += 24 * 60;
+    }
+
+    let hours = minutes / 60;
+    if (hours > 4) {
+      hours -= 1.5;
+    }
+
+    if (hours <= 0) {
+      continue;
+    }
+
+    workDays++;
+    if (hours <= 8) {
+      normalHours += hours;
+    } else {
+      normalHours += 8;
+      overtimeHours += hours - 8;
+    }
+  }
+
+  return {
+    normalHours: roundHours(normalHours),
+    overtimeHours: roundHours(overtimeHours),
+    workDays,
+    punchDays,
+    punchTimes,
+  };
+}
+
+function parseTime(timeStr: string) {
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  return hour * 60 + minute;
+}
+
+function formatMinutes(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function roundHours(hours: number) {
+  return Math.round(hours * 10) / 10;
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, '').replace(/[:：]/g, '');
+}
+
+function cellText(value: CellValue) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const year = searchParams.get('year');
     const month = searchParams.get('month');
-    
-    let records;
-    if (year && month) {
-      records = query.getWorkHoursMonthlyByYearMonth.all(parseInt(year), parseInt(month));
-    } else {
-      records = query.getWorkHoursMonthly.all();
-    }
-    
+
+    const records = year && month
+      ? query.getWorkHoursMonthlyByYearMonth.all(parseInt(year, 10), parseInt(month, 10))
+      : query.getWorkHoursMonthly.all();
+
     return NextResponse.json({ success: true, data: records });
   } catch (error) {
     console.error('Get attendance error:', error);

@@ -136,6 +136,14 @@ interface MonthlyRecord {
   remark?: string;
 }
 
+function normalizeLocation(value?: string | null): 'office' | 'workshop' {
+  return value === '办公室' || value === 'office' ? 'office' : 'workshop';
+}
+
+function matchesRecordLocation(record: MonthlyRecord, location: 'office' | 'workshop') {
+  return normalizeLocation(record.location) === location;
+}
+
 export default function SalaryPage() {
   const [activeTab, setActiveTab] = useState('salary');
   const [searchMonth, setSearchMonth] = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
@@ -201,7 +209,7 @@ export default function SalaryPage() {
     
     // 过滤并解析有效时间
     const validTimes = times
-      .map(t => t.replace(/\(.*\)/, '').trim()) // 移除备注
+      .map(t => t.replace(/[（(].*?[）)]/g, '').trim()) // 移除备注
       .filter(t => /^\d{1,2}:\d{2}$/.test(t))
       .map(t => parseTime(t))
       .filter(t => t !== null) as number[];
@@ -272,6 +280,53 @@ export default function SalaryPage() {
       firstTime: formatTime(firstTime),
       lastTime: formatTime(lastTime)
     };
+  };
+
+  const parseAttendanceDetails = (record: MonthlyRecord): Record<string, unknown> => {
+    if (!record.details) return {};
+    try {
+      const parsed = JSON.parse(record.details);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const getAttendanceTimes = (value: unknown) => {
+    if (typeof value === 'string') {
+      return value.split('\n').filter(t => t.trim());
+    }
+    if (value && typeof value === 'object' && Array.isArray((value as { times?: unknown }).times)) {
+      return ((value as { times: unknown[] }).times)
+        .map(t => String(t))
+        .filter(t => t.trim());
+    }
+    return [];
+  };
+
+  const hasAttendancePunchDetails = (record: MonthlyRecord) => {
+    const details = parseAttendanceDetails(record);
+    return Object.values(details).some(value =>
+      getAttendanceTimes(value).some(time => /\d{1,2}:\d{2}/.test(time))
+    );
+  };
+
+  const calculateAttendanceRecordSummary = (record: MonthlyRecord) => {
+    const details = parseAttendanceDetails(record);
+    let normalHours = 0;
+    let overtimeHours = 0;
+
+    Object.entries(details).forEach(([day, value]) => {
+      const dayNumber = parseInt(day, 10);
+      if (!dayNumber) return;
+      const date = new Date(record.year, record.month_num - 1, dayNumber);
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      const calculated = calculateWorkHours(getAttendanceTimes(value), isWeekend);
+      normalHours += calculated.normalHours;
+      overtimeHours += calculated.overtimeHours;
+    });
+
+    return { normalHours, overtimeHours };
   };
   
   // 计算员工工时明细
@@ -1582,7 +1637,7 @@ export default function SalaryPage() {
                   <div>
                     <div className="text-2xl font-bold text-blue-600">
                       ¥{(monthlyRecords.length > 0 
-                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (salaryLocation === 'office' ? '办公室' : '车间')).reduce((sum, r) => sum + r.actual_amount, 0)
+                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, salaryLocation)).reduce((sum, r) => sum + r.actual_amount, 0)
                         : 0).toLocaleString()}
                     </div>
                     <div className="text-sm text-muted-foreground">累计发放</div>
@@ -1590,7 +1645,7 @@ export default function SalaryPage() {
                   <div>
                     <div className="text-2xl font-bold text-orange-600">
                       {monthlyRecords.length > 0 
-                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (salaryLocation === 'office' ? '办公室' : '车间')).reduce((sum, r) => sum + r.weekday_overtime, 0)
+                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, salaryLocation)).reduce((sum, r) => sum + r.weekday_overtime, 0)
                         : 0}小时
                     </div>
                     <div className="text-sm text-muted-foreground">平时加班</div>
@@ -1598,14 +1653,14 @@ export default function SalaryPage() {
                   <div>
                     <div className="text-2xl font-bold text-green-600">
                       {monthlyRecords.length > 0 
-                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (salaryLocation === 'office' ? '办公室' : '车间')).reduce((sum, r) => sum + r.weekend_overtime, 0)
+                        ? monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, salaryLocation)).reduce((sum, r) => sum + r.weekend_overtime, 0)
                         : 0}小时
                     </div>
                     <div className="text-sm text-muted-foreground">周末加班</div>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-purple-600">
-                      {monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.signature && r.location === (salaryLocation === 'office' ? '办公室' : '车间')).length}人
+                      {monthlyRecords.filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.signature && matchesRecordLocation(r, salaryLocation)).length}人
                     </div>
                     <div className="text-sm text-muted-foreground">已签字</div>
                   </div>
@@ -1917,8 +1972,7 @@ export default function SalaryPage() {
                 const monthRecords = monthlyRecords
                   .filter(r => {
                     if (r.year !== year || r.month_num !== month) return false;
-                    const recordLocation = r.location === '办公室' || r.location === 'office' ? 'office' : 'workshop';
-                    return recordLocation === attendanceLocation;
+                    return matchesRecordLocation(r, attendanceLocation) && hasAttendancePunchDetails(r);
                   });
                 
                 if (monthRecords.length === 0) {
@@ -2020,7 +2074,7 @@ export default function SalaryPage() {
                   <div>
                     <div className="text-2xl font-bold text-blue-600">
                       {monthlyRecords
-                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (attendanceLocation === 'office' ? '办公室' : '车间'))
+                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, attendanceLocation) && hasAttendancePunchDetails(r))
                         .length}
                     </div>
                     <div className="text-sm text-muted-foreground">员工数</div>
@@ -2028,23 +2082,23 @@ export default function SalaryPage() {
                   <div>
                     <div className="text-2xl font-bold text-orange-600">
                       {monthlyRecords
-                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (attendanceLocation === 'office' ? '办公室' : '车间'))
-                        .reduce((sum, r) => sum + (r.normal_hours || 0), 0).toFixed(1)}小时
+                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, attendanceLocation) && hasAttendancePunchDetails(r))
+                        .reduce((sum, r) => sum + calculateAttendanceRecordSummary(r).normalHours, 0).toFixed(1)}小时
                     </div>
                     <div className="text-sm text-muted-foreground">正班工时</div>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-green-600">
                       {monthlyRecords
-                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (attendanceLocation === 'office' ? '办公室' : '车间'))
-                        .reduce((sum, r) => sum + (r.weekday_overtime || 0) + (r.weekend_overtime || 0), 0).toFixed(1)}小时
+                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, attendanceLocation) && hasAttendancePunchDetails(r))
+                        .reduce((sum, r) => sum + calculateAttendanceRecordSummary(r).overtimeHours, 0).toFixed(1)}小时
                     </div>
                     <div className="text-sm text-muted-foreground">加班工时</div>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-purple-600">
                       {monthlyRecords
-                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && r.location === (attendanceLocation === 'office' ? '办公室' : '车间'))
+                        .filter(r => r.year === parseInt(searchYear) && r.month_num === parseInt(searchMonth) && matchesRecordLocation(r, attendanceLocation) && hasAttendancePunchDetails(r))
                         .filter(r => r.signature).length}人
                     </div>
                     <div className="text-sm text-muted-foreground">已签字</div>

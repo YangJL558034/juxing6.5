@@ -68,7 +68,7 @@ export function WorkHoursImport({ onImportSalary, onImportWorkHours, onImportCom
   const [importStep, setImportStep] = useState<'input' | 'preview' | 'success'>('input');
   const [rawData, setRawData] = useState('');
   const [importType, setImportType] = useState<'salary' | 'workhours' | 'attendance'>('attendance');
-  const [importLocation, setImportLocation] = useState<'办公室' | '车间'>('办公室');
+  const [importLocation, setImportLocation] = useState<'办公室' | '车间'>('车间');
   const [parsedSalaryData, setParsedSalaryData] = useState<{ month: string; year: string; records: SalaryRecord[] } | null>(null);
   const [parsedWorkHoursData, setParsedWorkHoursData] = useState<{ month: string; year: string; employees: any[] } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -343,7 +343,7 @@ export function WorkHoursImport({ onImportSalary, onImportWorkHours, onImportCom
             year: result.data.year || new Date().getFullYear(),
             month: result.data.month || (new Date().getMonth() + 1),
             location: result.data.location || importLocation,
-            count: result.data.total || result.data.records?.length || 0
+            count: result.data.imported || result.data.records?.length || 0
           });
         }
       } catch (error) {

@@ -5,20 +5,27 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { Badge } from '@/components/ui/badge';
 import { 
   Search, 
   Clock, 
   Timer, 
   Wallet,
   User,
+  Fingerprint,
+  Building2,
+  MapPin,
+  CalendarDays,
+  CheckCircle2,
+  AlertCircle,
+  ReceiptText,
+  CreditCard,
+  CircleDollarSign,
+  BadgeCheck,
   ChevronLeft,
   ChevronRight,
   RotateCcw,
-  Edit2,
-  Plus,
-  Trash2,
   Maximize2,
   Minimize2,
   X
@@ -135,7 +142,7 @@ const calculateWorkHours = (times: string[], isWeekendDay: boolean) => {
   
   // 过滤并解析有效时间
   const validTimes = times
-    .map(t => t.replace(/\(.*\)/, '').trim()) // 移除备注
+    .map(t => t.replace(/[（(].*?[）)]/g, '').trim()) // 移除备注
     .filter(t => /^\d{1,2}:\d{2}$/.test(t))
     .map(t => parseTime(t))
     .filter(t => t !== null) as number[];
@@ -206,6 +213,22 @@ const formatWorkHours = (hours: number): string => {
   return `${h}小时${m}分`;
 };
 
+const formatMoney = (value?: number): string => {
+  const amount = Number(value ?? 0);
+  return `¥${amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const hasAmount = (value?: number): boolean => Math.abs(Number(value ?? 0)) > 0;
+
+const normalizeLocationLabel = (value?: string): string => {
+  if (value === 'office') return '办公室';
+  if (value === 'workshop') return '车间';
+  return value || '-';
+};
+
 export default function EmployeeQueryPage() {
   const [name, setName] = useState('');
   const [idCard, setIdCard] = useState('');
@@ -260,9 +283,9 @@ export default function EmployeeQueryPage() {
         });
         
         // 自动选择最新有数据的月份
-        const records = data.salaryRecords || [];
+        const records = (data.salaryRecords || []) as SalaryRecord[];
         if (records.length > 0) {
-          const latestRecord = records.reduce((a: any, b: any) => 
+          const latestRecord = records.reduce((a, b) => 
             (b.year * 12 + b.month_num) > (a.year * 12 + a.month_num) ? b : a
           );
           setSelectedYear(String(latestRecord.year));
@@ -533,64 +556,131 @@ export default function EmployeeQueryPage() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 21 }, (_, i) => String(currentYear - 10 + i));
   const monthOptions = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+  const selectedMonthLabel = `${selectedYear}年${parseInt(selectedMonth)}月`;
+  const attendanceMonthKeys = Object.keys(attendanceByMonth).sort().reverse();
+  const totalNormalHours = workHoursData.reduce((s, r) => s + r.normalHours, 0);
+  const totalOvertimeHours = workHoursData.reduce((s, r) => s + r.overtimeHours, 0);
+  const totalWorkHours = workHoursData.reduce((s, r) => s + r.totalHours, 0);
+  const signedSalaryCount = salaryRecords.filter(record => record.signature).length;
+  const latestSalaryRecord = salaryRecords.length > 0
+    ? salaryRecords.reduce((latest, record) =>
+      (record.year * 12 + record.month_num) > (latest.year * 12 + latest.month_num) ? record : latest
+    )
+    : null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* 顶部导航栏 - 毛玻璃效果 */}
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
-        <div className="max-w-5xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
-          <h1 className="text-lg sm:text-xl font-bold text-center text-slate-800">员工自助查询</h1>
+    <div className="min-h-screen bg-[#f4f6f2] text-slate-950">
+      <div className="sticky top-0 z-50 border-b border-stone-200/80 bg-[#f8f9f6]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#12343b] text-white shadow-sm">
+              <BadgeCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-base font-semibold tracking-normal text-slate-950 sm:text-lg">员工自助查询</h1>
+              <p className="text-xs text-slate-500">工资 · 工时 · 打卡</p>
+            </div>
+          </div>
+          <Badge variant="outline" className="hidden border-emerald-200 bg-emerald-50 text-emerald-700 sm:inline-flex">
+            在职员工
+          </Badge>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-3 sm:p-4">
-        {/* 搜索卡片 */}
-        <Card className="shadow-lg border-0">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex flex-col gap-3 sm:gap-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="text-xs sm:text-sm font-medium text-slate-700 mb-1 block">姓名</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="请输入姓名"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="pl-10 text-sm sm:text-base"
-                    />
+      <main className="mx-auto max-w-6xl px-4 py-4 sm:px-6 sm:py-6">
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <Card className="overflow-hidden border-0 bg-white py-0 shadow-sm ring-1 ring-stone-200/80">
+            <CardContent className="p-0">
+              <div className="border-b border-stone-100 bg-[#fbfcfa] px-4 py-4 sm:px-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-400">身份校验</p>
+                    <h2 className="text-lg font-semibold text-slate-950">查询入口</h2>
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs sm:text-sm font-medium text-slate-700 mb-1 block">身份证号</label>
-                  <Input
-                    placeholder="请输入身份证号"
-                    value={idCard}
-                    onChange={(e) => setIdCard(e.target.value)}
-                    className="text-sm sm:text-base"
-                  />
+              </div>
+
+              <div className="space-y-4 p-4 sm:p-5">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">姓名</label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        placeholder="请输入姓名"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="h-12 rounded-lg border-stone-200 bg-white pl-10 text-base shadow-none focus-visible:ring-cyan-600/20"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">身份证号</label>
+                    <div className="relative">
+                      <Fingerprint className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        placeholder="请输入身份证号"
+                        value={idCard}
+                        onChange={(e) => setIdCard(e.target.value)}
+                        className="h-12 rounded-lg border-stone-200 bg-white pl-10 text-base shadow-none focus-visible:ring-cyan-600/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Button
+                    onClick={handleSearch}
+                    className="h-12 w-full rounded-lg bg-[#12343b] px-6 text-base font-medium hover:bg-[#0f2b31] sm:w-auto"
+                    disabled={loading || !name.trim() || !idCard.trim() || idCard.trim().length < 15}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    {loading ? '查询中...' : '查询'}
+                  </Button>
+                  {!idCard.trim() || idCard.trim().length < 15 ? (
+                    <p className="flex items-center gap-1 text-xs text-amber-700">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      请输入完整的身份证号
+                    </p>
+                  ) : null}
                 </div>
               </div>
-              <Button 
-                onClick={handleSearch} 
-                className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto sm:px-8"
-                disabled={loading || !name.trim() || !idCard.trim() || idCard.trim().length < 15}
-              >
-                <Search className="h-4 w-4 mr-2" />
-                {loading ? '查询中...' : '查询'}
-              </Button>
-              {!idCard.trim() || idCard.trim().length < 15 ? (
-                <p className="text-xs text-amber-600 mt-1">请输入完整的身份证号后查询</p>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 bg-[#12343b] py-0 text-white shadow-sm">
+            <CardContent className="flex h-full flex-col justify-between gap-6 p-5">
+              <div>
+                <p className="text-xs font-medium text-white/55">当前月份</p>
+                <p className="mt-2 text-2xl font-semibold">{selectedMonthLabel}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-white/10 px-2 py-3">
+                  <p className="text-lg font-semibold">{attendanceRecords.length}</p>
+                  <p className="text-[11px] text-white/65">打卡</p>
+                </div>
+                <div className="rounded-lg bg-white/10 px-2 py-3">
+                  <p className="text-lg font-semibold">{salaryRecords.length}</p>
+                  <p className="text-[11px] text-white/65">工资</p>
+                </div>
+                <div className="rounded-lg bg-white/10 px-2 py-3">
+                  <p className="text-lg font-semibold">{signedSalaryCount}</p>
+                  <p className="text-[11px] text-white/65">确认</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
 
         {/* 未找到提示 */}
         {notFound && (
-          <Card className="mt-4 border-red-200 bg-red-50">
-            <CardContent className="p-4 text-center">
-              <p className="text-red-600">未找到员工信息，请确认姓名和身份证号是否正确</p>
+          <Card className="mt-4 border-0 bg-red-50 py-0 ring-1 ring-red-100">
+            <CardContent className="flex items-center gap-3 p-4 text-red-700">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <p className="text-sm font-medium">未找到员工信息，请确认姓名和身份证号是否正确</p>
             </CardContent>
           </Card>
         )}
@@ -599,75 +689,97 @@ export default function EmployeeQueryPage() {
         {searched && employee && (
           <>
             {/* 员工信息 */}
-            <Card className="mt-4 border-0 shadow">
-              <CardContent className="p-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-xs text-slate-500">姓名</p>
-                    <p className="font-semibold text-slate-800">{employee.name}</p>
+            <Card className="mt-4 overflow-hidden border-0 bg-white py-0 shadow-sm ring-1 ring-stone-200/80">
+              <CardContent className="p-0">
+                <div className="flex flex-col gap-4 border-b border-stone-100 bg-[#fbfcfa] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#f0d58c] text-[#3a2c10]">
+                      <User className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">当前员工</p>
+                      <h2 className="text-xl font-semibold text-slate-950">{employee.name}</h2>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs text-slate-500">身份证号</p>
-                    <p className="font-semibold text-slate-800">{employee.id_card || '-'}</p>
+                  {latestSalaryRecord && (
+                    <div className="rounded-xl bg-emerald-50 px-4 py-3 text-left sm:text-right">
+                      <p className="text-xs text-emerald-700">最近实发</p>
+                      <p className="text-lg font-semibold text-emerald-800">{formatMoney(latestSalaryRecord.actual_amount)}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border border-stone-200 bg-white p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500"><Fingerprint className="h-3.5 w-3.5" />身份证号</p>
+                    <p className="mt-1 break-all text-sm font-semibold text-slate-900">{employee.id_card || '-'}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-slate-500">部门</p>
-                    <p className="font-semibold text-slate-800">{employee.department || '-'}</p>
+                  <div className="rounded-xl border border-stone-200 bg-white p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500"><Building2 className="h-3.5 w-3.5" />部门</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{employee.department || '-'}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-slate-500">位置</p>
-                    <p className="font-semibold text-slate-800">{employee.location || '-'}</p>
+                  <div className="rounded-xl border border-stone-200 bg-white p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500"><MapPin className="h-3.5 w-3.5" />位置</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{normalizeLocationLabel(employee.location)}</p>
+                  </div>
+                  <div className="rounded-xl border border-stone-200 bg-white p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5" />状态</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{employee.status || '-'}</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
             {/* 三大手风琴模块 */}
-            <Accordion type="single" collapsible className="mt-4 space-y-2">
+            <Accordion type="single" collapsible defaultValue="salary" className="mt-4 space-y-3">
               {/* 打卡记录 */}
-              <AccordionItem value="attendance" className="border-0 bg-white rounded-lg shadow px-3 sm:px-4">
-                <AccordionTrigger className="hover:no-underline py-3 sm:py-4">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
-                      <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+              <AccordionItem value="attendance" className="overflow-hidden rounded-2xl border-0 bg-white px-4 shadow-sm ring-1 ring-stone-200/80 sm:px-5">
+                <AccordionTrigger className="py-4 hover:no-underline">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                      <Clock className="h-5 w-5" />
                     </div>
-                    <span className="font-semibold text-slate-800 text-sm sm:text-base">打卡记录</span>
-                    <span className="text-xs sm:text-sm text-slate-500">({attendanceRecords.length}条)</span>
+                    <div className="min-w-0 text-left">
+                      <p className="font-semibold text-slate-950">打卡记录</p>
+                      <p className="text-xs text-slate-500">{attendanceRecords.length} 条记录</p>
+                    </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
-                  {Object.keys(attendanceByMonth).length === 0 ? (
-                    <p className="text-center text-slate-500 py-8">暂无打卡记录</p>
+                  {attendanceMonthKeys.length === 0 ? (
+                    <p className="rounded-xl bg-stone-50 py-8 text-center text-sm text-slate-500">暂无打卡记录</p>
                   ) : (
-                    <Accordion type="single" collapsible className="space-y-2">
-                      {Object.keys(attendanceByMonth).sort().reverse().map(monthKey => {
+                    <Accordion type="single" collapsible className="space-y-3">
+                      {attendanceMonthKeys.map(monthKey => {
                         const [y, m] = monthKey.split('-').map(Number);
                         const days = getDaysInMonth(y, m);
                         const maxCount = getMaxAttendanceCount(monthKey);
                         
                         return (
-                          <AccordionItem key={monthKey} value={monthKey} className="border border-slate-200 rounded-lg px-2">
-                            <AccordionTrigger className="hover:no-underline py-2">
-                              <span className="font-medium">{y}年{m}月</span>
-                              <span className="text-sm text-slate-500 ml-2">
-                                ({attendanceByMonth[monthKey].length}条打卡)
-                              </span>
+                          <AccordionItem key={monthKey} value={monthKey} className="rounded-xl border border-stone-200 bg-[#fbfcfa] px-3">
+                            <AccordionTrigger className="py-3 hover:no-underline">
+                              <div className="flex items-center gap-2">
+                                <CalendarDays className="h-4 w-4 text-slate-500" />
+                                <span className="font-medium text-slate-900">{y}年{m}月</span>
+                              </div>
+                              <Badge variant="outline" className="mr-2 border-stone-200 bg-white text-slate-600">
+                                {attendanceByMonth[monthKey].length} 条
+                              </Badge>
                             </AccordionTrigger>
                             <AccordionContent>
-                              {/* 滑动提示 */}
-                              <div className="flex items-center justify-center gap-2 text-xs text-slate-400 mb-2">
-                                <ChevronLeft className="h-3 w-3" />
-                                <span>左右滑动查看</span>
-                                <ChevronRight className="h-3 w-3" />
+                              <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+                                <span>月度明细</span>
+                                <span className="flex items-center gap-1">
+                                  <ChevronLeft className="h-3 w-3" />
+                                  <ChevronRight className="h-3 w-3" />
+                                </span>
                               </div>
-                              {/* 打卡网格 */}
-                              <div className="overflow-x-auto border border-blue-200 rounded-lg">
+                              <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
                                 <table className="min-w-max text-xs">
                                   <thead>
-                                    <tr className="bg-slate-50">
-                                      <th className="sticky left-0 z-10 bg-slate-50 p-2 border border-blue-200 min-w-[40px]">#</th>
+                                    <tr className="bg-stone-50">
+                                      <th className="sticky left-0 z-10 min-w-[52px] border-r border-stone-200 bg-stone-50 p-2 text-slate-500">次数</th>
                                       {Array.from({ length: days }, (_, i) => i + 1).map(day => (
-                                        <th key={day} className={`p-2 border border-blue-200 min-w-[60px] ${isWeekend(y, m, day) ? 'bg-yellow-50' : ''}`}>
+                                        <th key={day} className={`min-w-[62px] border-r border-stone-200 p-2 ${isWeekend(y, m, day) ? 'bg-amber-50' : ''}`}>
                                           <div>{day}</div>
                                           <div className="text-slate-400">{getWeekday(y, m, day)}</div>
                                         </th>
@@ -677,14 +789,13 @@ export default function EmployeeQueryPage() {
                                   <tbody>
                                     {Array.from({ length: maxCount }, (_, i) => i + 1).map(row => (
                                       <tr key={row}>
-                                        <td className="sticky left-0 z-10 bg-white p-2 border border-blue-200 text-center font-medium">
+                                        <td className="sticky left-0 z-10 border-r border-t border-stone-200 bg-white p-2 text-center font-medium text-slate-700">
                                           第{row}次
                                         </td>
                                         {Array.from({ length: days }, (_, i) => i + 1).map(day => {
                                           const records = getDayAttendance(monthKey, day);
                                           const record = records[row - 1];
                                           const time = record?.time;
-                                          const fullDate = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                                           // 检查是否有备注（括号内容）
                                           const hasNote = time && time.includes('（');
                                           const displayTime = time ? time.substring(0, 5) : '';
@@ -692,13 +803,13 @@ export default function EmployeeQueryPage() {
                                           return (
                                             <td 
                                               key={day} 
-                                              className={`p-1.5 border border-blue-200 text-center ${isWeekend(y, m, day) ? 'bg-yellow-50' : ''}`}
+                                              className={`border-r border-t border-stone-200 p-1.5 text-center ${isWeekend(y, m, day) ? 'bg-amber-50' : ''}`}
                                             >
                                               {time ? (
                                                 <div className="flex flex-col items-center">
-                                                  <span className={hasNote ? 'text-blue-600 font-medium' : ''}>{displayTime}</span>
+                                                  <span className={hasNote ? 'font-medium text-cyan-700' : 'text-slate-800'}>{displayTime}</span>
                                                   {hasNote && (
-                                                    <span className="text-[10px] text-blue-500 truncate max-w-[50px]">
+                                                    <span className="max-w-[50px] truncate text-[10px] text-cyan-600">
                                                       {time.match(/（(.+?)）/)?.[1]?.substring(0, 4)}
                                                     </span>
                                                   )}
@@ -724,184 +835,234 @@ export default function EmployeeQueryPage() {
               </AccordionItem>
 
               {/* 工时 */}
-              <AccordionItem value="workhours" className="border-0 bg-white rounded-lg shadow px-3 sm:px-4">
-                <AccordionTrigger className="hover:no-underline py-3 sm:py-4">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg">
-                      <Timer className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+              <AccordionItem value="workhours" className="overflow-hidden rounded-2xl border-0 bg-white px-4 shadow-sm ring-1 ring-stone-200/80 sm:px-5">
+                <AccordionTrigger className="py-4 hover:no-underline">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700">
+                      <Timer className="h-5 w-5" />
                     </div>
-                    <span className="font-semibold text-slate-800 text-sm sm:text-base">工时</span>
+                    <div className="min-w-0 text-left">
+                      <p className="font-semibold text-slate-950">工时</p>
+                      <p className="text-xs text-slate-500">{selectedMonthLabel}</p>
+                    </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
-                  {/* 筛选栏 */}
-                  <div className="flex flex-wrap gap-2 items-center mb-3 sm:mb-4">
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
                     <Select value={selectedYear} onValueChange={setSelectedYear}>
-                      <SelectTrigger className="w-20 sm:w-24 h-8 sm:h-10 text-xs sm:text-sm">
+                      <SelectTrigger className="h-10 w-24 rounded-lg border-stone-200 text-sm">
                         <SelectValue placeholder="年" />
                       </SelectTrigger>
                       <SelectContent>
                         {yearOptions.map(y => (
-                          <SelectItem key={y} value={y} className="text-xs sm:text-sm">{y}年</SelectItem>
+                          <SelectItem key={y} value={y} className="text-sm">{y}年</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                      <SelectTrigger className="w-20 sm:w-24 h-8 sm:h-10 text-xs sm:text-sm">
+                      <SelectTrigger className="h-10 w-24 rounded-lg border-stone-200 text-sm">
                         <SelectValue placeholder="月" />
                       </SelectTrigger>
                       <SelectContent>
                         {monthOptions.map(m => (
-                          <SelectItem key={m} value={m} className="text-xs sm:text-sm">{parseInt(m)}月</SelectItem>
+                          <SelectItem key={m} value={m} className="text-sm">{parseInt(m)}月</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button size="sm" variant="outline" className="h-8 sm:h-9 text-xs sm:text-sm px-2 sm:px-3">
+                    <Button size="sm" variant="outline" className="h-10 rounded-lg border-stone-200 px-4 text-sm">
                       查询
                     </Button>
                   </div>
                   
-                  {/* 工时表格 */}
                   {workHoursData.length === 0 ? (
-                    <p className="text-center text-slate-500 py-6 sm:py-8 text-sm">暂无工时记录</p>
+                    <p className="rounded-xl bg-stone-50 py-8 text-center text-sm text-slate-500">暂无工时记录</p>
                   ) : (
                     <>
-                      <div className="flex items-center justify-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-slate-400 mb-1 sm:mb-2">
-                        <ChevronLeft className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                        <span>左右滑动查看</span>
-                        <ChevronRight className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                      <div className="mb-4 grid grid-cols-3 gap-2">
+                        <div className="rounded-xl bg-cyan-50 p-3 text-center">
+                          <p className="text-sm font-semibold text-cyan-800 sm:text-lg">{formatWorkHours(totalNormalHours)}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">正班</p>
+                        </div>
+                        <div className="rounded-xl bg-amber-50 p-3 text-center">
+                          <p className="text-sm font-semibold text-amber-800 sm:text-lg">{formatWorkHours(totalOvertimeHours)}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">加班</p>
+                        </div>
+                        <div className="rounded-xl bg-emerald-50 p-3 text-center">
+                          <p className="text-sm font-semibold text-emerald-800 sm:text-lg">{formatWorkHours(totalWorkHours)}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">合计</p>
+                        </div>
                       </div>
-                      <div className="overflow-x-auto border rounded-lg -mx-3 sm:mx-0">
-                        <table className="min-w-full text-[11px] sm:text-sm">
+
+                      <div className="space-y-3 md:hidden">
+                        {workHoursData.map((row, i) => (
+                          <div key={i} className={`rounded-xl border p-3 ${row.isWeekend ? 'border-amber-200 bg-amber-50/70' : 'border-stone-200 bg-white'}`}>
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="font-medium text-slate-950">{row.date}</p>
+                                <p className="text-xs text-slate-500">星期{row.weekday}</p>
+                              </div>
+                              <Badge variant="outline" className={row.isWeekend ? 'border-amber-200 bg-white text-amber-700' : 'border-stone-200 bg-stone-50 text-slate-600'}>
+                                {row.isWeekend ? '周末' : '工作日'}
+                              </Badge>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {row.allTimes.map((t: string, idx: number) => (
+                                <span key={idx} className={`rounded-md px-2 py-1 text-xs ${idx === 0 || idx === row.allTimes.length - 1 ? 'bg-cyan-50 text-cyan-700' : 'bg-stone-100 text-slate-600'}`}>
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                              <div className="rounded-lg bg-white/80 p-2">
+                                <p className="text-xs text-slate-500">上班</p>
+                                <p className="font-medium text-slate-900">{row.checkInTime || '-'}</p>
+                              </div>
+                              <div className="rounded-lg bg-white/80 p-2">
+                                <p className="text-xs text-slate-500">下班</p>
+                                <p className="font-medium text-slate-900">{row.checkOutTime || '-'}</p>
+                              </div>
+                              <div className="rounded-lg bg-white/80 p-2">
+                                <p className="text-xs text-slate-500">合计</p>
+                                <p className="font-medium text-slate-900">{formatWorkHours(row.totalHours)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="hidden overflow-x-auto rounded-xl border border-stone-200 md:block">
+                        <table className="min-w-full text-sm">
                           <thead>
-                            <tr className="bg-slate-50">
-                              <th className="p-1.5 sm:p-2 border text-left whitespace-nowrap">日期</th>
-                              <th className="p-1.5 sm:p-2 border text-left">星期</th>
-                              <th className="p-1.5 sm:p-2 border text-left whitespace-nowrap">打卡记录</th>
-                              <th className="p-1.5 sm:p-2 border text-left">上班</th>
-                              <th className="p-1.5 sm:p-2 border text-left">下班</th>
-                              <th className="p-1.5 sm:p-2 border text-left">正班</th>
-                              <th className="p-1.5 sm:p-2 border text-left">加班</th>
-                              <th className="p-1.5 sm:p-2 border text-left">合计</th>
+                            <tr className="bg-stone-50 text-slate-600">
+                              <th className="border-r border-stone-200 p-2 text-left whitespace-nowrap">日期</th>
+                              <th className="border-r border-stone-200 p-2 text-left">星期</th>
+                              <th className="border-r border-stone-200 p-2 text-left whitespace-nowrap">打卡记录</th>
+                              <th className="border-r border-stone-200 p-2 text-left">上班</th>
+                              <th className="border-r border-stone-200 p-2 text-left">下班</th>
+                              <th className="border-r border-stone-200 p-2 text-left">正班</th>
+                              <th className="border-r border-stone-200 p-2 text-left">加班</th>
+                              <th className="p-2 text-left">合计</th>
                             </tr>
                           </thead>
                           <tbody>
                             {workHoursData.map((row, i) => (
-                              <tr key={i} className={row.isWeekend ? 'bg-yellow-50' : ''}>
-                                <td className="p-1.5 sm:p-2 border whitespace-nowrap">{row.date}</td>
-                                <td className="p-1.5 sm:p-2 border">{row.weekday}</td>
-                                <td className="p-1.5 sm:p-2 border text-xs text-slate-600">
+                              <tr key={i} className={row.isWeekend ? 'bg-amber-50/70' : 'bg-white'}>
+                                <td className="border-r border-t border-stone-200 p-2 whitespace-nowrap">{row.date}</td>
+                                <td className="border-r border-t border-stone-200 p-2">{row.weekday}</td>
+                                <td className="border-r border-t border-stone-200 p-2 text-xs text-slate-600">
                                   <div className="flex flex-wrap gap-1">
                                     {row.allTimes.map((t: string, idx: number) => (
-                                      <span key={idx} className={`px-1 rounded ${idx === 0 || idx === row.allTimes.length - 1 ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`}>
+                                      <span key={idx} className={`rounded px-1.5 py-0.5 ${idx === 0 || idx === row.allTimes.length - 1 ? 'bg-cyan-50 text-cyan-700' : 'bg-stone-100'}`}>
                                         {t}
                                       </span>
                                     ))}
                                   </div>
                                 </td>
-                                <td className="p-1.5 sm:p-2 border">{row.checkInTime || '-'}</td>
-                                <td className="p-1.5 sm:p-2 border">{row.checkOutTime || '-'}</td>
-                                <td className="p-1.5 sm:p-2 border text-blue-600">{formatWorkHours(row.normalHours)}</td>
-                                <td className="p-1.5 sm:p-2 border text-orange-600">{formatWorkHours(row.overtimeHours)}</td>
-                                <td className="p-1.5 sm:p-2 border font-medium">{formatWorkHours(row.totalHours)}</td>
+                                <td className="border-r border-t border-stone-200 p-2">{row.checkInTime || '-'}</td>
+                                <td className="border-r border-t border-stone-200 p-2">{row.checkOutTime || '-'}</td>
+                                <td className="border-r border-t border-stone-200 p-2 text-cyan-700">{formatWorkHours(row.normalHours)}</td>
+                                <td className="border-r border-t border-stone-200 p-2 text-amber-700">{formatWorkHours(row.overtimeHours)}</td>
+                                <td className="border-t border-stone-200 p-2 font-medium">{formatWorkHours(row.totalHours)}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
-                      </div>
-                      {/* 汇总 */}
-                      <div className="mt-3 sm:mt-4 grid grid-cols-3 gap-2 sm:gap-4">
-                        <div className="bg-blue-50 rounded-lg p-2 sm:p-3 text-center">
-                          <p className="text-sm sm:text-lg font-bold text-blue-600">
-                            {formatWorkHours(workHoursData.reduce((s, r) => s + r.normalHours, 0))}
-                          </p>
-                          <p className="text-[10px] sm:text-xs text-slate-500">正班工时</p>
-                        </div>
-                        <div className="bg-orange-50 rounded-lg p-2 sm:p-3 text-center">
-                          <p className="text-sm sm:text-lg font-bold text-orange-600">
-                            {formatWorkHours(workHoursData.reduce((s, r) => s + r.overtimeHours, 0))}
-                          </p>
-                          <p className="text-[10px] sm:text-xs text-slate-500">加班工时</p>
-                        </div>
-                        <div className="bg-green-50 rounded-lg p-2 sm:p-3 text-center">
-                          <p className="text-sm sm:text-lg font-bold text-green-600">
-                            {formatWorkHours(workHoursData.reduce((s, r) => s + r.totalHours, 0))}
-                          </p>
-                          <p className="text-[10px] sm:text-xs text-slate-500">总工时</p>
-                        </div>
                       </div>
                     </>
                   )}
                 </AccordionContent>
               </AccordionItem>
 
-              {/* 工资 - 新卡片样式 */}
-              <AccordionItem value="salary" className="border-0 bg-white rounded-lg shadow px-4 sm:px-6">
-                <AccordionTrigger className="hover:no-underline py-4 sm:py-5">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-2 sm:p-2.5 bg-orange-100 rounded-lg">
-                      <Wallet className="h-5 w-5 sm:h-6 sm:w-6 text-orange-600" />
+              {/* 工资 */}
+              <AccordionItem value="salary" className="overflow-hidden rounded-2xl border-0 bg-white px-4 shadow-sm ring-1 ring-stone-200/80 sm:px-5">
+                <AccordionTrigger className="py-4 hover:no-underline">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                      <Wallet className="h-5 w-5" />
                     </div>
-                    <span className="font-semibold text-slate-800 text-base sm:text-lg">工资</span>
+                    <div className="min-w-0 text-left">
+                      <p className="font-semibold text-slate-950">工资</p>
+                      <p className="text-xs text-slate-500">{selectedMonthLabel}</p>
+                    </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
-                  {/* 筛选栏 */}
-                  <div className="flex flex-wrap gap-2 sm:gap-3 items-center mb-4 sm:mb-5">
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
                     <Select value={selectedYear} onValueChange={setSelectedYear}>
-                      <SelectTrigger className="w-20 sm:w-28 h-9 sm:h-10 text-sm sm:text-base">
+                      <SelectTrigger className="h-10 w-24 rounded-lg border-stone-200 text-sm">
                         <SelectValue placeholder="年" />
                       </SelectTrigger>
                       <SelectContent>
                         {yearOptions.map(y => (
-                          <SelectItem key={y} value={y} className="text-sm sm:text-base">{y}年</SelectItem>
+                          <SelectItem key={y} value={y} className="text-sm">{y}年</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                      <SelectTrigger className="w-20 sm:w-28 h-9 sm:h-10 text-sm sm:text-base">
+                      <SelectTrigger className="h-10 w-24 rounded-lg border-stone-200 text-sm">
                         <SelectValue placeholder="月" />
                       </SelectTrigger>
                       <SelectContent>
                         {monthOptions.map(m => (
-                          <SelectItem key={m} value={m} className="text-sm sm:text-base">{parseInt(m)}月</SelectItem>
+                          <SelectItem key={m} value={m} className="text-sm">{parseInt(m)}月</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button size="default" variant="outline" className="h-9 sm:h-10 text-sm sm:text-base px-4 sm:px-5">查询</Button>
+                    <Button size="sm" variant="outline" className="h-10 rounded-lg border-stone-200 px-4 text-sm">查询</Button>
                   </div>
                   
-                  {/* 工资卡片列表 */}
                   {filteredSalaryRecords.length === 0 ? (
-                    <p className="text-center text-slate-500 py-8 sm:py-10 text-base">暂无工资记录</p>
+                    <p className="rounded-xl bg-stone-50 py-8 text-center text-sm text-slate-500">暂无工资记录</p>
                   ) : (
                     <div className="space-y-4">
                       {filteredSalaryRecords.map((record) => {
                         const isOffice = record.location !== '车间';
                         return (
-                          <div key={record.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                            {/* 顶部标题栏 */}
-                            <div className="bg-slate-50 px-4 py-3 flex items-center justify-between">
-                              <div>
-                                <h3 className="font-semibold text-slate-800">山泽{record.year}年{record.month_num}月份工资条</h3>
-                                <p className="text-sm text-slate-500">{record.employee_name}</p>
+                          <div key={record.id} className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+                            <div className="bg-[#12343b] px-4 py-4 text-white sm:px-5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-xs text-white/60">{record.year}年{record.month_num}月</p>
+                                  <h3 className="mt-1 text-lg font-semibold">{record.employee_name}</h3>
+                                </div>
+                                <Badge className={record.signature ? 'border-0 bg-emerald-100 text-emerald-800' : 'border-0 bg-white/15 text-white'}>
+                                  {record.signature ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+                                  {record.signature ? '已确认' : '待确认'}
+                                </Badge>
                               </div>
-                              <div className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 ${
-                                record.signature 
-                                  ? 'bg-green-100 text-green-700' 
-                                  : 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {record.signature && <span className="text-green-600">✓</span>}
-                                {record.signature ? '已确认' : '待确认'}
+                              <div className="mt-5 flex items-end justify-between gap-3">
+                                <div>
+                                  <p className="text-xs text-white/60">实发工资</p>
+                                  <p className="mt-1 text-3xl font-semibold tracking-normal">{formatMoney(record.actual_amount)}</p>
+                                </div>
+                                <div className="text-right text-xs text-white/65">
+                                  <p>{isOffice ? '办公室' : '车间'}</p>
+                                  <p>{record.department || '-'}</p>
+                                </div>
                               </div>
                             </div>
                             
-                            <div className="px-4 py-2 text-xs text-slate-400 border-b">
-                              请及时确认 如有疑问请联系财务部
+                            <div className="flex flex-wrap items-center gap-2 border-b border-stone-100 bg-[#fbfcfa] px-4 py-3 text-xs text-slate-500 sm:px-5">
+                              <Badge variant="outline" className="border-stone-200 bg-white text-slate-600">
+                                <ReceiptText className="h-3 w-3" />
+                                工资条
+                              </Badge>
+                              {record.bank_account && (
+                                <Badge variant="outline" className="border-stone-200 bg-white text-slate-600">
+                                  <CreditCard className="h-3 w-3" />
+                                  银行卡
+                                </Badge>
+                              )}
+                              {hasAmount(record.total_payable) && (
+                                <Badge variant="outline" className="border-stone-200 bg-white text-slate-600">
+                                  <CircleDollarSign className="h-3 w-3" />
+                                  应领 {formatMoney(record.total_payable)}
+                                </Badge>
+                              )}
                             </div>
                             
                             {/* 基础信息 */}
-                            <div className="p-4 space-y-2 border-b border-slate-100">
+                            <div className="space-y-2 border-b border-stone-100 p-4 sm:px-5">
                               <div className="flex justify-between text-sm">
                                 <span className="text-slate-500">序号</span>
                                 <span className="text-slate-800">{record.id}</span>
@@ -919,8 +1080,8 @@ export default function EmployeeQueryPage() {
                             </div>
                             
                             {/* 考勤记录 */}
-                            <div className="p-4 border-b border-slate-100">
-                              <p className="text-xs text-slate-400 mb-3">考勤记录</p>
+                            <div className="border-b border-stone-100 p-4 sm:px-5">
+                              <p className="mb-3 text-xs font-medium uppercase tracking-[0.12em] text-slate-400">考勤记录</p>
                               <div className="space-y-2">
                                 {(record.should_attend_days ?? 0) > 0 && (
                                   <div className="flex justify-between text-sm">
@@ -968,8 +1129,8 @@ export default function EmployeeQueryPage() {
                             </div>
                             
                             {/* 基本工资+补贴项目 */}
-                            <div className="p-4 border-b border-slate-100">
-                              <p className="text-xs text-slate-400 mb-3">基本工资+补贴项目</p>
+                            <div className="border-b border-stone-100 p-4 sm:px-5">
+                              <p className="mb-3 text-xs font-medium uppercase tracking-[0.12em] text-slate-400">基本工资+补贴项目</p>
                               <div className="space-y-2">
                                 {(record.normal_pay ?? 0) > 0 && (
                                   <div className="flex justify-between text-sm">
@@ -1054,8 +1215,8 @@ export default function EmployeeQueryPage() {
                             </div>
                             
                             {/* 应扣项目 */}
-                            <div className="p-4 border-b border-slate-100">
-                              <p className="text-xs text-slate-400 mb-3">应扣项目</p>
+                            <div className="border-b border-stone-100 p-4 sm:px-5">
+                              <p className="mb-3 text-xs font-medium uppercase tracking-[0.12em] text-slate-400">应扣项目</p>
                               <div className="space-y-2">
                                 {(record.housing_fund ?? 0) > 0 && (
                                   <div className="flex justify-between text-sm">
@@ -1091,7 +1252,7 @@ export default function EmployeeQueryPage() {
                             </div>
                             
                             {/* 底部汇总 */}
-                            <div className="p-4 bg-slate-50">
+                            <div className="bg-[#fbfcfa] p-4 sm:px-5">
                               <div className="space-y-2">
                                 {(record.social_security_subsidy ?? 0) > 0 && (
                                   <div className="flex justify-between text-sm">
@@ -1174,39 +1335,39 @@ export default function EmployeeQueryPage() {
                                 )}
                                 {/* 实发工资 */}
                                 {(record.actual_amount ?? 0) > 0 && (
-                                  <div className="flex justify-between text-base font-bold border-t border-slate-200 pt-2 mt-2">
+                                  <div className="mt-2 flex justify-between border-t border-stone-200 pt-3 text-base font-bold">
                                     <span className="text-slate-800">实发工资</span>
-                                    <span className="text-green-600">¥{record.actual_amount?.toLocaleString() ?? "0"}</span>
+                                    <span className="text-emerald-700">{formatMoney(record.actual_amount)}</span>
                                   </div>
                                 )}
                                 {/* 银行卡号 */}
                                 {record.bank_account && (
-                                  <div className="flex justify-between text-sm mt-3">
+                                  <div className="mt-3 flex justify-between text-sm">
                                     <span className="text-slate-500">银行卡号</span>
-                                    <span className="text-slate-700 text-right max-w-[60%] break-all">{record.bank_account}</span>
+                                    <span className="max-w-[60%] break-all text-right text-slate-700">{record.bank_account}</span>
                                   </div>
                                 )}
                               </div>
                             </div>
                             
                             {/* 签字区域 */}
-                            <div className="px-4 py-3 border-t flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-3 border-t border-stone-100 px-4 py-3 sm:px-5">
                               {record.signature ? (
                                 <div className="flex items-center gap-3">
-                                  <img src={record.signature} alt="签字" className="h-12 border rounded" />
-                                  <div className="text-xs text-slate-400">
-                                    <p>已签字确认</p>
+                                  <img src={record.signature} alt="签字" className="h-12 rounded-lg border border-stone-200 bg-white" />
+                                  <div className="text-xs text-slate-500">
+                                    <p className="font-medium text-emerald-700">已签字确认</p>
                                     {record.signature_time && <p>{new Date(record.signature_time).toLocaleDateString()}</p>}
                                   </div>
                                 </div>
                               ) : (
                                 <>
-                                  <p className="text-xs text-slate-400">请在下方画板签名确认工资明细</p>
+                                  <p className="text-xs text-slate-500">签字状态：待确认</p>
                                   <Button 
                                     size="sm" 
                                     variant="outline" 
                                     onClick={() => openSignDialog(record.id)}
-                                    className="h-8 text-xs"
+                                    className="h-9 rounded-lg border-stone-200 px-3 text-xs hover:bg-stone-50"
                                   >
                                     签字确认
                                   </Button>
@@ -1216,7 +1377,7 @@ export default function EmployeeQueryPage() {
                             
                             {/* 备注 */}
                             {record.remark && (
-                              <div className="px-4 py-2 bg-amber-50 border-t border-amber-100">
+                              <div className="border-t border-amber-100 bg-amber-50 px-4 py-2 sm:px-5">
                                 <p className="text-xs text-amber-700">备注：{record.remark}</p>
                               </div>
                             )}
@@ -1233,35 +1394,35 @@ export default function EmployeeQueryPage() {
 
         {/* 签字对话框 */}
         {signDialogOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setSignDialogOpen(false)} />
-            <div className="relative z-10 w-full h-full max-w-2xl bg-white flex flex-col shadow-2xl">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6">
+            <div className="absolute inset-0 bg-slate-950/55" onClick={() => setSignDialogOpen(false)} />
+            <div className="relative z-10 flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl sm:h-[78vh] sm:rounded-2xl">
+              <div className="flex items-center justify-between border-b border-stone-200 bg-[#fbfcfa] px-4 py-3 sm:rounded-t-2xl">
                 <div>
-                  <h3 className="text-base font-semibold">确认签字</h3>
-                  <p className="text-xs text-slate-500">请在下方画板签名确认工资明细</p>
+                  <h3 className="text-base font-semibold text-slate-950">确认签字</h3>
+                  <p className="text-xs text-slate-500">工资明细确认</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={toggleFullscreen}
-                    className="p-2 rounded-lg border border-slate-300 hover:bg-slate-100 transition-colors"
+                    className="rounded-lg border border-stone-300 p-2 transition-colors hover:bg-stone-100"
                     title={isFullscreen ? '退出全屏' : '全屏'}
                   >
                     {isFullscreen ? <Minimize2 className="h-5 w-5 text-slate-600" /> : <Maximize2 className="h-5 w-5 text-slate-600" />}
                   </button>
                   <button
                     onClick={() => setSignDialogOpen(false)}
-                    className="p-2 rounded-lg border border-slate-300 hover:bg-slate-100 transition-colors"
+                    className="rounded-lg border border-stone-300 p-2 transition-colors hover:bg-stone-100"
                   >
                     <X className="h-5 w-5 text-slate-600" />
                   </button>
                 </div>
               </div>
-              <div className="flex-1 flex flex-col p-4 bg-gray-50">
-                <div className="flex-1 border-2 border-dashed border-slate-300 rounded-lg bg-white overflow-hidden">
+              <div className="flex flex-1 flex-col bg-[#f4f6f2] p-4">
+                <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-dashed border-stone-300 bg-white">
                   <canvas
                     ref={canvasRef}
-                    className="w-full h-full cursor-crosshair touch-none"
+                    className="h-full w-full touch-none cursor-crosshair"
                     onMouseDown={startDrawing}
                     onMouseMove={draw}
                     onMouseUp={stopDrawing}
@@ -1271,17 +1432,17 @@ export default function EmployeeQueryPage() {
                     onTouchEnd={stopDrawing}
                   />
                 </div>
-                <div className="flex gap-3 mt-4">
+                <div className="mt-4 flex gap-3">
                   <button
                     onClick={clearSignature}
-                    className="flex-1 min-h-[48px] px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                    className="flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium transition-colors hover:bg-stone-100"
                   >
                     <RotateCcw className="h-4 w-4" />
                     清除
                   </button>
                   <button
                     onClick={submitSignature}
-                    className="flex-1 min-h-[48px] px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                    className="flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-lg bg-[#12343b] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#0f2b31]"
                   >
                     确认签字
                   </button>
@@ -1292,10 +1453,10 @@ export default function EmployeeQueryPage() {
         )}
 
         {/* 底部说明 */}
-        <div className="mt-6 text-center text-slate-400 text-sm">
+        <div className="mt-6 text-center text-sm text-slate-400">
           <p>如有问题请联系人事部门</p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
