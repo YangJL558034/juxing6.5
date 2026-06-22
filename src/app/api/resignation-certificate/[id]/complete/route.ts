@@ -10,8 +10,53 @@ async function requireUser(request: NextRequest) {
   return verifyToken(token);
 }
 
+function firstHeaderValue(value: string | null) {
+  return value?.split(',')[0]?.trim() || '';
+}
+
+function isLocalOrigin(origin: string) {
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function normalizeOrigin(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function resolvePublicOrigin(request: NextRequest) {
+  const forwardedHost = firstHeaderValue(request.headers.get('x-forwarded-host'));
+  const host = forwardedHost || firstHeaderValue(request.headers.get('host'));
+  const forwardedProto = firstHeaderValue(request.headers.get('x-forwarded-proto'));
+  const proto = forwardedProto || (request.headers.get('x-forwarded-ssl') === 'on' ? 'https' : '');
+
+  if (host && !/^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?$/i.test(host)) {
+    return `${proto || 'https'}://${host}`;
+  }
+
+  const referer = request.headers.get('referer');
+  if (referer) {
+    const refererOrigin = new URL(referer).origin;
+    if (!isLocalOrigin(refererOrigin)) {
+      return refererOrigin;
+    }
+  }
+
+  const requestOrigin = new URL(request.url).origin;
+  if (!isLocalOrigin(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return normalizeOrigin(process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.APP_URL || requestOrigin);
+}
+
 function queryLink(request: NextRequest) {
-  const origin = new URL(request.url).origin;
+  const origin = resolvePublicOrigin(request);
   return `${origin}/resignation-certificate?query=1`;
 }
 
