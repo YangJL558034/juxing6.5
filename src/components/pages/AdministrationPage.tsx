@@ -1087,14 +1087,15 @@ export default function AdministrationPage() {
             <div className="pointer-events-none absolute right-0 top-full w-[520px] max-w-[calc(100vw-2rem)] origin-top-right translate-y-1 pt-2 opacity-0 transition-all duration-200 ease-out group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100">
               <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-xl ring-1 ring-slate-900/5">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Link
+                  <a
                     href="/dormitory"
                     target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-100 hover:shadow-sm"
                   >
                     <Plus className="h-4 w-4" />
                     住宿申请
-                  </Link>
+                  </a>
                   <Link
                     href="/water-meter"
                     target="_blank"
@@ -1569,9 +1570,9 @@ export default function AdministrationPage() {
             </div>
           </div>
           <Button asChild variant="outline" className="mt-4 w-full border-blue-200 bg-white text-blue-700 hover:bg-blue-50">
-            <Link href="/dormitory" target="_blank">
+            <a href="/dormitory" target="_blank" rel="noopener noreferrer">
               打开申请页
-            </Link>
+            </a>
           </Button>
         </div>
         <div className="rounded-lg border border-cyan-100 bg-cyan-50 p-4">
