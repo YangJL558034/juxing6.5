@@ -11,7 +11,10 @@ export interface WaterMeterDbRow {
   usage_amount: number | null;
   unit_price: number | null;
   fee_amount: number | null;
+  recorder_user_id: number | null;
   recorder_name: string | null;
+  photo_url: string | null;
+  photo_name: string | null;
   remark: string | null;
   created_at: string;
 }
@@ -34,7 +37,10 @@ export function parseWaterMeterRow(row: WaterMeterDbRow): WaterMeterRecord {
     usageAmount: row.usage_amount,
     unitPrice: row.unit_price,
     feeAmount: row.fee_amount,
+    recorderUserId: row.recorder_user_id,
     recorderName: row.recorder_name,
+    photoUrl: row.photo_url,
+    photoName: row.photo_name,
     remark: row.remark,
     createdAt: row.created_at,
   };

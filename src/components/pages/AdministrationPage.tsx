@@ -74,6 +74,21 @@ interface ListResponse {
   error?: string;
 }
 
+interface WaterMeterMutateResponse {
+  success: boolean;
+  record?: WaterMeterRecord;
+  error?: string;
+}
+
+interface WaterMeterFormState {
+  roomNo: string;
+  readingDate: string;
+  currentReading: string;
+  unitPrice: string;
+  recorderName: string;
+  remark: string;
+}
+
 interface MutateResponse {
   success: boolean;
   record?: DormitoryRecord;
@@ -143,6 +158,7 @@ export type AdministrationSectionKey = 'dormitory' | 'items' | 'rooms' | 'beds' 
 
 const emptyCounts: DormitoryCounts = { total: 0, pending: 0, reviewed: 0, checkedIn: 0, checkedOut: 0 };
 const emptyWaterSummary: WaterMeterSummary = { total: 0, totalUsage: 0, totalFee: 0 };
+const defaultWaterUnitPrice = '6.48';
 const roomTypeOptions = ['未设置', '男生寝室', '女生寝室'];
 
 const administrationSectionLabels: Record<AdministrationSectionKey, string> = {
@@ -335,6 +351,21 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
   const [waterLoading, setWaterLoading] = useState(false);
   const [waterRoomFilter, setWaterRoomFilter] = useState('all');
   const [waterExportMonth, setWaterExportMonth] = useState(currentMonth());
+  const [waterEditOpen, setWaterEditOpen] = useState(false);
+  const [waterEditTarget, setWaterEditTarget] = useState<WaterMeterRecord | null>(null);
+  const [waterDetailRecord, setWaterDetailRecord] = useState<WaterMeterRecord | null>(null);
+  const [waterEditForm, setWaterEditForm] = useState<WaterMeterFormState>({
+    roomNo: '',
+    readingDate: '',
+    currentReading: '',
+    unitPrice: defaultWaterUnitPrice,
+    recorderName: '',
+    remark: '',
+  });
+  const [waterEditPhotoFile, setWaterEditPhotoFile] = useState<File | null>(null);
+  const [waterEditRemovePhoto, setWaterEditRemovePhoto] = useState(false);
+  const [waterUpdating, setWaterUpdating] = useState(false);
+  const [deletingWaterId, setDeletingWaterId] = useState<number | null>(null);
   const [roomSaving, setRoomSaving] = useState(false);
   const [bedSaving, setBedSaving] = useState(false);
   const [newRoomNo, setNewRoomNo] = useState('');
@@ -1082,6 +1113,99 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
     if (waterRoomFilter !== 'all') params.set('roomNo', waterRoomFilter);
     params.set('month', waterExportMonth);
     window.open(`/api/water-meter/export?${params.toString()}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const openEditWaterRecord = (record: WaterMeterRecord) => {
+    setWaterEditTarget(record);
+    setWaterEditForm({
+      roomNo: record.roomNo,
+      readingDate: formatDate(record.readingDate),
+      currentReading: record.currentReadingText || String(record.currentReading),
+      unitPrice: record.unitPrice === null || record.unitPrice === undefined ? defaultWaterUnitPrice : String(record.unitPrice),
+      recorderName: record.recorderName || '',
+      remark: record.remark || '',
+    });
+    setWaterEditPhotoFile(null);
+    setWaterEditRemovePhoto(false);
+    setWaterEditOpen(true);
+  };
+
+  const updateWaterEditForm = <K extends keyof WaterMeterFormState>(field: K, value: WaterMeterFormState[K]) => {
+    setWaterEditForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitWaterRecordEdit = async () => {
+    if (!waterEditTarget) return;
+    if (!waterEditForm.roomNo) {
+      alert('请选择房号');
+      return;
+    }
+    if (!waterEditForm.readingDate) {
+      alert('请选择登记日期');
+      return;
+    }
+    if (!waterEditForm.currentReading.trim()) {
+      alert('请填写本次水表读数');
+      return;
+    }
+
+    setWaterUpdating(true);
+    try {
+      const body = new FormData();
+      body.append('id', String(waterEditTarget.id));
+      body.append('roomNo', waterEditForm.roomNo);
+      body.append('readingDate', waterEditForm.readingDate);
+      body.append('currentReading', waterEditForm.currentReading.trim());
+      body.append('unitPrice', waterEditForm.unitPrice.trim() || defaultWaterUnitPrice);
+      body.append('remark', waterEditForm.remark.trim());
+      if (waterEditRemovePhoto) body.append('removePhoto', '1');
+      if (waterEditPhotoFile) body.append('photo', waterEditPhotoFile);
+      const response = await fetch('/api/water-meter', {
+        method: 'PUT',
+        body,
+      });
+      const result = await response.json().catch(() => ({})) as WaterMeterMutateResponse;
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '更新水表记录失败');
+      }
+
+      setWaterEditOpen(false);
+      setWaterEditTarget(null);
+      setWaterEditPhotoFile(null);
+      setWaterEditRemovePhoto(false);
+      await loadWaterRecords();
+    } catch (updateError) {
+      alert(updateError instanceof Error ? updateError.message : '更新水表记录失败');
+    } finally {
+      setWaterUpdating(false);
+    }
+  };
+
+  const deleteWaterRecord = async (record: WaterMeterRecord) => {
+    if (!confirm(`确定删除房号 ${record.roomNo} 在 ${formatDate(record.readingDate)} 的水表记录吗？`)) return;
+
+    setDeletingWaterId(record.id);
+    try {
+      const response = await fetch('/api/water-meter', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: record.id }),
+      });
+      const result = await response.json().catch(() => ({})) as WaterMeterMutateResponse;
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '删除水表记录失败');
+      }
+
+      if (waterEditTarget?.id === record.id) {
+        setWaterEditOpen(false);
+        setWaterEditTarget(null);
+      }
+      await loadWaterRecords();
+    } catch (deleteError) {
+      alert(deleteError instanceof Error ? deleteError.message : '删除水表记录失败');
+    } finally {
+      setDeletingWaterId(null);
+    }
   };
 
   const sectionLabel = administrationSectionLabels[section];
@@ -1865,6 +1989,7 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
                               <TableHead>登记人</TableHead>
                               <TableHead>备注</TableHead>
                               <TableHead>提交时间</TableHead>
+                              <TableHead className="min-w-36">操作</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1881,6 +2006,26 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
                                 <TableCell>{display(record.recorderName)}</TableCell>
                                 <TableCell>{display(record.remark)}</TableCell>
                                 <TableCell>{formatDateTime(record.createdAt)}</TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <button type="button" className="text-sm font-medium text-blue-600 hover:text-blue-700" onClick={() => setWaterDetailRecord(record)}>
+                                      详情
+                                    </button>
+                                    <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-slate-700 hover:text-slate-950" onClick={() => openEditWaterRecord(record)}>
+                                      <Pencil className="h-3.5 w-3.5" />
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                                      disabled={deletingWaterId === record.id}
+                                      onClick={() => void deleteWaterRecord(record)}
+                                    >
+                                      {deletingWaterId === record.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                      删除
+                                    </button>
+                                  </div>
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -2243,6 +2388,7 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
                               <TableHead>登记人</TableHead>
                               <TableHead>备注</TableHead>
                               <TableHead>提交时间</TableHead>
+                              <TableHead className="min-w-36">操作</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -2259,6 +2405,26 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
                                 <TableCell>{display(record.recorderName)}</TableCell>
                                 <TableCell>{display(record.remark)}</TableCell>
                                 <TableCell>{formatDateTime(record.createdAt)}</TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <button type="button" className="text-sm font-medium text-blue-600 hover:text-blue-700" onClick={() => setWaterDetailRecord(record)}>
+                                      详情
+                                    </button>
+                                    <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-slate-700 hover:text-slate-950" onClick={() => openEditWaterRecord(record)}>
+                                      <Pencil className="h-3.5 w-3.5" />
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                                      disabled={deletingWaterId === record.id}
+                                      onClick={() => void deleteWaterRecord(record)}
+                                    >
+                                      {deletingWaterId === record.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                      删除
+                                    </button>
+                                  </div>
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -2278,6 +2444,126 @@ export default function AdministrationPage({ section = 'dormitory' }: { section?
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={exportWaterRecords}>
               <Download className="h-4 w-4" />
               导出所选月份
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(waterDetailRecord)} onOpenChange={(open) => !open && setWaterDetailRecord(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>水表详情</DialogTitle>
+            <DialogDescription>查看本条水表记录和上传照片。</DialogDescription>
+          </DialogHeader>
+          {waterDetailRecord && (
+            <div className="space-y-4">
+              <DetailGrid
+                pairs={[
+                  ['房号', waterDetailRecord.roomNo],
+                  ['登记日期', formatDate(waterDetailRecord.readingDate)],
+                  ['上次读数', waterDetailRecord.previousReadingText],
+                  ['本次读数', waterDetailRecord.currentReadingText],
+                  ['本次用量', waterDetailRecord.usageAmount],
+                  ['水费单价', waterDetailRecord.unitPrice],
+                  ['水费金额', waterDetailRecord.feeAmount === null ? null : `¥${waterDetailRecord.feeAmount}`],
+                  ['登记人', waterDetailRecord.recorderName],
+                  ['提交时间', formatDateTime(waterDetailRecord.createdAt)],
+                  ['备注', waterDetailRecord.remark],
+                ]}
+              />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700">水表照片</p>
+                {waterDetailRecord.photoUrl ? (
+                  <a href={waterDetailRecord.photoUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={waterDetailRecord.photoUrl} alt={waterDetailRecord.photoName || '水表照片'} className="max-h-[60vh] w-full rounded-lg border border-slate-100 object-contain" />
+                  </a>
+                ) : (
+                  <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500">
+                    暂无照片
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWaterDetailRecord(null)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={waterEditOpen} onOpenChange={setWaterEditOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>修改水表记录</DialogTitle>
+            <DialogDescription>可修改历史水表记录，保存后系统会重新计算该房号后续用水量和水费。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">房号</label>
+                <Select value={waterEditForm.roomNo} onValueChange={(value) => updateWaterEditForm('roomNo', value)}>
+                  <SelectTrigger><SelectValue placeholder="请选择房号" /></SelectTrigger>
+                  <SelectContent>
+                    {rooms.map((room) => (
+                      <SelectItem key={room.id} value={room.roomNo}>{room.roomNo}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">登记日期</label>
+                <Input type="date" value={waterEditForm.readingDate} onChange={(event) => updateWaterEditForm('readingDate', event.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">本次水表读数</label>
+                <Input value={waterEditForm.currentReading} onChange={(event) => updateWaterEditForm('currentReading', event.target.value)} inputMode="decimal" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">水费单价</label>
+                <Input value={waterEditForm.unitPrice} onChange={(event) => updateWaterEditForm('unitPrice', event.target.value)} inputMode="decimal" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">登记人</label>
+              <Input value={waterEditForm.recorderName || '系统将按当前登录用户自动记录'} disabled />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">水表照片</label>
+              {waterEditTarget?.photoUrl && !waterEditRemovePhoto && (
+                <a href={waterEditTarget.photoUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <img src={waterEditTarget.photoUrl} alt={waterEditTarget.photoName || '水表照片'} className="max-h-64 w-full rounded-lg border border-slate-100 object-contain" />
+                </a>
+              )}
+              <Input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(event) => {
+                  setWaterEditPhotoFile(event.target.files?.[0] || null);
+                  setWaterEditRemovePhoto(false);
+                }}
+              />
+              {waterEditPhotoFile && <p className="text-xs text-slate-500">已选择：{waterEditPhotoFile.name}</p>}
+              {waterEditTarget?.photoUrl && (
+                <Button type="button" variant="outline" size="sm" onClick={() => { setWaterEditRemovePhoto(true); setWaterEditPhotoFile(null); }}>
+                  删除原照片
+                </Button>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">备注</label>
+              <Textarea value={waterEditForm.remark} onChange={(event) => updateWaterEditForm('remark', event.target.value)} className="min-h-24" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWaterEditOpen(false)} disabled={waterUpdating}>
+              取消
+            </Button>
+            <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => void submitWaterRecordEdit()} disabled={waterUpdating}>
+              {waterUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
+              保存修改
             </Button>
           </DialogFooter>
         </DialogContent>

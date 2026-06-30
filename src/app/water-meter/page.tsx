@@ -1,20 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
+  Camera,
   CheckCircle2,
   Droplets,
   Gauge,
   Home,
+  Images,
   Loader2,
   UserRound,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import type { WaterMeterRoomOption } from '@/types/water-meter';
+import type { WaterMeterRecord, WaterMeterRoomOption } from '@/types/water-meter';
 import { chinaToday } from '@/lib/china-time';
 
 const today = chinaToday;
@@ -55,13 +58,18 @@ export default function WaterMeterPage() {
   const [roomNo, setRoomNo] = useState('');
   const [readingDate, setReadingDate] = useState(today());
   const [currentReading, setCurrentReading] = useState('');
-  const [unitPrice, setUnitPrice] = useState('');
-  const [recorderName, setRecorderName] = useState('');
+  const [unitPrice, setUnitPrice] = useState('6.48');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [remark, setRemark] = useState('');
   const [loadingRooms, setLoadingRooms] = useState(true);
+  const [loadingRegisteredRooms, setLoadingRegisteredRooms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const readingMonth = useMemo(() => (readingDate && /^\d{4}-\d{2}/.test(readingDate) ? readingDate.slice(0, 7) : today().slice(0, 7)), [readingDate]);
+  const [registeredRoomNos, setRegisteredRoomNos] = useState<string[]>([]);
+  const registeredRoomSet = useMemo(() => new Set(registeredRoomNos), [registeredRoomNos]);
+  const availableRoomsCount = useMemo(() => rooms.filter((room) => !registeredRoomSet.has(room.roomNo)).length, [registeredRoomSet, rooms]);
   const selectedRoom = useMemo(() => rooms.find((room) => room.roomNo === roomNo) || null, [roomNo, rooms]);
   const currentReadingNumber = Number(currentReading);
   const unitPriceNumber = unitPrice.trim() ? Number(unitPrice) : null;
@@ -72,44 +80,84 @@ export default function WaterMeterPage() {
     ? round2(usageAmount * unitPriceNumber)
     : null;
 
-  useEffect(() => {
-    const loadRooms = async () => {
-      setLoadingRooms(true);
-      try {
-        const response = await fetch('/api/water-meter/rooms', { cache: 'no-store' });
-        const result = await response.json().catch(() => ({})) as {
-          success?: boolean;
-          rooms?: WaterMeterRoomOption[];
-          error?: string;
-        };
+  const loadRooms = useCallback(async () => {
+    setLoadingRooms(true);
+    try {
+      const response = await fetch('/api/water-meter/rooms', { cache: 'no-store' });
+      const result = await response.json().catch(() => ({})) as {
+        success?: boolean;
+        rooms?: WaterMeterRoomOption[];
+        error?: string;
+      };
 
-        if (!response.ok || !result.success) {
-          throw new Error(result.error || '获取房号失败');
-        }
-
-        setRooms(result.rooms || []);
-      } catch (error) {
-        alert(error instanceof Error ? error.message : '获取房号失败');
-      } finally {
-        setLoadingRooms(false);
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '获取房号失败');
       }
-    };
 
-    void loadRooms();
+      setRooms(result.rooms || []);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '获取房号失败');
+    } finally {
+      setLoadingRooms(false);
+    }
   }, []);
+
+  const loadRegisteredRooms = useCallback(async (month: string) => {
+    if (!month) return;
+    setLoadingRegisteredRooms(true);
+    try {
+      const params = new URLSearchParams({ month });
+      const response = await fetch(`/api/water-meter?${params.toString()}`, { cache: 'no-store' });
+      const result = await response.json().catch(() => ({})) as {
+        success?: boolean;
+        records?: WaterMeterRecord[];
+        error?: string;
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '获取本月已登记房号失败');
+      }
+
+      setRegisteredRoomNos(Array.from(new Set((result.records || []).map((record) => record.roomNo))));
+    } catch (error) {
+      setRegisteredRoomNos([]);
+      alert(error instanceof Error ? error.message : '获取本月已登记房号失败');
+    } finally {
+      setLoadingRegisteredRooms(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRooms();
+  }, [loadRooms]);
+
+  useEffect(() => {
+    void loadRegisteredRooms(readingMonth);
+  }, [loadRegisteredRooms, readingMonth]);
+
+  useEffect(() => {
+    if (roomNo && registeredRoomSet.has(roomNo)) {
+      setRoomNo('');
+    }
+  }, [registeredRoomSet, roomNo]);
 
   const resetForm = () => {
     setRoomNo('');
     setReadingDate(today());
     setCurrentReading('');
-    setUnitPrice('');
-    setRecorderName('');
+    setUnitPrice('6.48');
+    setPhotoFile(null);
     setRemark('');
   };
 
   const submit = async () => {
     if (!roomNo) {
       alert('请选择房号');
+      return;
+    }
+    if (registeredRoomSet.has(roomNo)) {
+      alert(`${roomNo} 已经登记过 ${readingMonth} 的水表，请选择其他房号`);
+      setRoomNo('');
       return;
     }
     if (!readingDate) {
@@ -131,17 +179,16 @@ export default function WaterMeterPage() {
 
     setSubmitting(true);
     try {
+      const body = new FormData();
+      body.append('roomNo', roomNo);
+      body.append('readingDate', readingDate);
+      body.append('currentReading', currentReading.trim());
+      body.append('unitPrice', unitPrice.trim() || '6.48');
+      body.append('remark', remark.trim());
+      if (photoFile) body.append('photo', photoFile);
       const response = await fetch('/api/water-meter', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomNo,
-          readingDate,
-          currentReading: currentReading.trim(),
-          unitPrice: unitPrice.trim(),
-          recorderName: recorderName.trim(),
-          remark: remark.trim(),
-        }),
+        body,
       });
       const result = await response.json().catch(() => ({})) as { success?: boolean; error?: string };
 
@@ -149,6 +196,7 @@ export default function WaterMeterPage() {
         throw new Error(result.error || '提交水表登记失败');
       }
 
+      setRegisteredRoomNos((current) => Array.from(new Set([...current, roomNo])));
       setSubmitted(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : '提交水表登记失败');
@@ -203,18 +251,27 @@ export default function WaterMeterPage() {
             </div>
             <div className="space-y-4 p-4">
               <Field label="房号" required icon={<Home className="h-4 w-4" />}>
-                <Select value={roomNo} onValueChange={setRoomNo} disabled={loadingRooms || rooms.length === 0}>
+                <Select value={roomNo} onValueChange={setRoomNo} disabled={loadingRooms || loadingRegisteredRooms || availableRoomsCount === 0}>
                   <SelectTrigger className="h-11 text-base">
-                    <SelectValue placeholder={loadingRooms ? '正在加载房号...' : '请选择房号'} />
+                    <SelectValue placeholder={loadingRooms || loadingRegisteredRooms ? '正在加载房号...' : availableRoomsCount === 0 ? '本月房号已全部登记' : '请选择房号'} />
                   </SelectTrigger>
                   <SelectContent>
-                    {rooms.map((room) => (
-                      <SelectItem key={room.roomNo} value={room.roomNo}>
-                        {room.roomNo}
+                    {rooms.map((room) => {
+                      const registered = registeredRoomSet.has(room.roomNo);
+                      return (
+                      <SelectItem key={room.roomNo} value={room.roomNo} disabled={registered}>
+                        <span className="flex w-full items-center justify-between gap-4">
+                          <span>{room.roomNo}</span>
+                          {registered && <span className="text-xs text-slate-400">已登记</span>}
+                        </span>
                       </SelectItem>
-                    ))}
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+                {registeredRoomNos.length > 0 && (
+                  <p className="text-xs text-slate-500">{readingMonth} 已登记 {registeredRoomNos.length} 个房号，已登记房号不可重复选择。</p>
+                )}
               </Field>
 
               {selectedRoom && (
@@ -266,7 +323,41 @@ export default function WaterMeterPage() {
               </Field>
 
               <Field label="登记人" icon={<UserRound className="h-4 w-4" />}>
-                <Input value={recorderName} onChange={(event) => setRecorderName(event.target.value)} placeholder="请输入登记人姓名，可选" className="h-11 text-base" />
+                <Input value="系统自动记录当前登录人" disabled className="h-11 text-base" />
+              </Field>
+
+              <Field label="水表照片" icon={<Droplets className="h-4 w-4" />}>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 active:bg-blue-100">
+                    <Camera className="h-4 w-4" />
+                    拍照上传
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="sr-only"
+                      onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-sm font-medium text-slate-700 active:bg-slate-50">
+                    <Images className="h-4 w-4" />
+                    相册选择
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
+                    />
+                  </label>
+                </div>
+                {photoFile && (
+                  <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <span className="min-w-0 truncate">已选择：{photoFile.name}</span>
+                    <button type="button" className="shrink-0 text-slate-500" onClick={() => setPhotoFile(null)} aria-label="移除照片">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
               </Field>
 
               <Field label="备注" icon={<Droplets className="h-4 w-4" />}>
@@ -278,6 +369,11 @@ export default function WaterMeterPage() {
                   暂无房号，请先在后台行政管理里添加房号。
                 </div>
               )}
+              {!loadingRooms && rooms.length > 0 && availableRoomsCount === 0 && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                  {readingMonth} 的房号已全部登记完成。
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -285,7 +381,7 @@ export default function WaterMeterPage() {
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-100 bg-white/95 px-4 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="mx-auto w-full max-w-[430px]">
-          <Button className="mobile-submit-button h-12 w-full bg-blue-600 text-base hover:bg-blue-700" onClick={submit} disabled={submitting || loadingRooms || rooms.length === 0}>
+          <Button className="mobile-submit-button h-12 w-full bg-blue-600 text-base hover:bg-blue-700" onClick={submit} disabled={submitting || loadingRooms || loadingRegisteredRooms || availableRoomsCount === 0}>
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
             添加水表
           </Button>

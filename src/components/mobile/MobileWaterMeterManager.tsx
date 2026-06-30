@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Download, Droplets, Loader2, Plus, RefreshCcw, Save, Search } from 'lucide-react';
+import { ArrowLeft, Camera, Download, Droplets, Eye, Images, Loader2, Pencil, Plus, RefreshCcw, Save, Search, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -57,7 +57,7 @@ function createEmptyForm(): WaterMeterFormState {
     roomNo: '',
     readingDate: chinaToday(),
     currentReading: '',
-    unitPrice: '',
+    unitPrice: '6.48',
     recorderName: '',
     remark: '',
   };
@@ -90,6 +90,18 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<WaterMeterFormState>(() => createEmptyForm());
+  const [editingRecord, setEditingRecord] = useState<WaterMeterRecord | null>(null);
+  const [detailRecord, setDetailRecord] = useState<WaterMeterRecord | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [registeredRoomNos, setRegisteredRoomNos] = useState<string[]>([]);
+
+  const formMonth = useMemo(() => {
+    return form.readingDate && /^\d{4}-\d{2}/.test(form.readingDate) ? form.readingDate.slice(0, 7) : chinaCurrentMonth();
+  }, [form.readingDate]);
+
+  const registeredRoomSet = useMemo(() => new Set(registeredRoomNos), [registeredRoomNos]);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -132,6 +144,25 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
     void loadRooms();
   }, [loadRooms]);
 
+  const loadRegisteredRooms = useCallback(async (targetMonth: string) => {
+    if (!targetMonth) return;
+    try {
+      const params = new URLSearchParams({ month: targetMonth });
+      const response = await fetch(`/api/water-meter?${params.toString()}`, { cache: 'no-store' });
+      const result = await response.json().catch(() => ({})) as WaterMeterListResponse;
+      if (!response.ok || !result.success) throw new Error(result.error || '获取本月已登记房号失败');
+      setRegisteredRoomNos(Array.from(new Set((result.records || []).map((record) => record.roomNo))));
+    } catch (registeredError) {
+      console.error('Load registered water meter rooms error:', registeredError);
+      setRegisteredRoomNos([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    void loadRegisteredRooms(formMonth);
+  }, [formMonth, formOpen, loadRegisteredRooms]);
+
   const groupedRecords = useMemo(() => {
     return records.reduce<Record<string, WaterMeterRecord[]>>((groups, record) => {
       const key = record.readingDate?.slice(0, 7) || '未登记月份';
@@ -149,9 +180,27 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
   };
 
   const openCreateForm = () => {
+    setEditingRecord(null);
+    setPhotoFile(null);
+    setRemovePhoto(false);
     setForm({
       ...createEmptyForm(),
-      roomNo: rooms[0]?.roomNo || '',
+      roomNo: '',
+    });
+    setFormOpen(true);
+  };
+
+  const openEditForm = (record: WaterMeterRecord) => {
+    setEditingRecord(record);
+    setPhotoFile(null);
+    setRemovePhoto(false);
+    setForm({
+      roomNo: record.roomNo,
+      readingDate: formatDate(record.readingDate),
+      currentReading: record.currentReadingText || String(record.currentReading),
+      unitPrice: record.unitPrice === null || record.unitPrice === undefined ? '6.48' : String(record.unitPrice),
+      recorderName: record.recorderName || '',
+      remark: record.remark || '',
     });
     setFormOpen(true);
   };
@@ -161,10 +210,40 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
   };
 
   const selectedRoom = rooms.find((room) => room.roomNo === form.roomNo);
+  const editingOriginalMonth = editingRecord ? formatDate(editingRecord.readingDate).slice(0, 7) : '';
+  const selectedRoomAlreadyRegistered = Boolean(
+    form.roomNo
+      && registeredRoomSet.has(form.roomNo)
+      && !(editingRecord && editingRecord.roomNo === form.roomNo && editingOriginalMonth === formMonth),
+  );
+
+  const deleteRecord = async (record: WaterMeterRecord) => {
+    if (!confirm(`确定删除 ${record.roomNo} ${formatDate(record.readingDate)} 的水表记录吗？`)) return;
+    setDeletingId(record.id);
+    try {
+      const response = await fetch('/api/water-meter', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: record.id }),
+      });
+      const result = await response.json().catch(() => ({})) as WaterMeterCreateResponse;
+      if (!response.ok || !result.success) throw new Error(result.error || '删除水表记录失败');
+      if (detailRecord?.id === record.id) setDetailRecord(null);
+      await Promise.all([loadRecords(), loadRooms()]);
+    } catch (deleteError) {
+      alert(deleteError instanceof Error ? deleteError.message : '删除水表记录失败');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const submitForm = async () => {
     if (!form.roomNo) {
       alert('请选择房号');
+      return;
+    }
+    if (selectedRoomAlreadyRegistered) {
+      alert(`${form.roomNo} 已经登记过 ${formMonth} 的水表，请选择其他房号`);
       return;
     }
     if (!form.readingDate) {
@@ -178,21 +257,25 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
 
     setSaving(true);
     try {
+      const body = new FormData();
+      if (editingRecord) body.append('id', String(editingRecord.id));
+      body.append('roomNo', form.roomNo);
+      body.append('readingDate', form.readingDate);
+      body.append('currentReading', form.currentReading.trim());
+      body.append('unitPrice', form.unitPrice.trim() || '6.48');
+      body.append('remark', form.remark.trim());
+      if (removePhoto) body.append('removePhoto', '1');
+      if (photoFile) body.append('photo', photoFile);
       const response = await fetch('/api/water-meter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomNo: form.roomNo,
-          readingDate: form.readingDate,
-          currentReading: form.currentReading.trim(),
-          unitPrice: form.unitPrice.trim(),
-          recorderName: form.recorderName.trim(),
-          remark: form.remark.trim(),
-        }),
+        method: editingRecord ? 'PUT' : 'POST',
+        body,
       });
       const result = await response.json().catch(() => ({})) as WaterMeterCreateResponse;
       if (!response.ok || !result.success) throw new Error(result.error || '提交水表记录失败');
       setFormOpen(false);
+      setEditingRecord(null);
+      setPhotoFile(null);
+      setRemovePhoto(false);
       const targetMonth = form.readingDate.slice(0, 7);
       if (targetMonth && targetMonth !== month) {
         setMonth(targetMonth);
@@ -306,16 +389,40 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
                   <div className="mt-1 font-medium text-slate-900">{display(record.usageAmount)}</div>
                 </div>
               </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <Button type="button" variant="outline" className="h-9 rounded-2xl text-xs" onClick={() => setDetailRecord(record)}>
+                  <Eye className="mr-1 h-3.5 w-3.5" />
+                  详情
+                </Button>
+                <Button type="button" variant="outline" className="h-9 rounded-2xl text-xs" onClick={() => openEditForm(record)}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                  修改
+                </Button>
+                <Button type="button" variant="outline" className="h-9 rounded-2xl border-red-100 text-xs text-red-600" onClick={() => void deleteRecord(record)} disabled={deletingId === record.id}>
+                  {deletingId === record.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1 h-3.5 w-3.5" />}
+                  删除
+                </Button>
+              </div>
             </article>
           ))}
         </section>
       ))}
 
-      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+      <Sheet
+        open={formOpen}
+        onOpenChange={(open) => {
+          setFormOpen(open);
+          if (!open) {
+            setEditingRecord(null);
+            setPhotoFile(null);
+            setRemovePhoto(false);
+          }
+        }}
+      >
         <SheetContent side="bottom" className="max-h-[88dvh] rounded-t-[30px] p-0">
           <SheetHeader className="border-b border-slate-100 px-4 py-4 text-left">
-            <SheetTitle>水费登记</SheetTitle>
-            <SheetDescription>在移动端直接添加水表记录，提交后同步到后台水费登记。</SheetDescription>
+            <SheetTitle>{editingRecord ? '修改水表记录' : '水费登记'}</SheetTitle>
+            <SheetDescription>{editingRecord ? '修改后会重新计算该房间后续水费。' : '在移动端添加水表记录，拍照后后台详情可查看。'}</SheetDescription>
           </SheetHeader>
           <div className="space-y-4 overflow-y-auto p-4">
             <div className="space-y-2">
@@ -326,16 +433,23 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-base outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               >
                 <option value="">请选择房号</option>
-                {rooms.map((room) => (
-                  <option key={room.roomNo} value={room.roomNo}>
-                    {room.roomNo}
-                  </option>
-                ))}
+                {rooms.map((room) => {
+                  const registered = registeredRoomSet.has(room.roomNo);
+                  const isEditingOriginalRoom = Boolean(editingRecord && editingRecord.roomNo === room.roomNo && editingOriginalMonth === formMonth);
+                  return (
+                    <option key={room.roomNo} value={room.roomNo} disabled={registered && !isEditingOriginalRoom}>
+                      {room.roomNo}{registered && !isEditingOriginalRoom ? '（已登记）' : ''}
+                    </option>
+                  );
+                })}
               </select>
               {selectedRoom && (
                 <p className="text-xs text-slate-500">
                   上次读数：{display(selectedRoom.latestReadingText)} / {formatDate(selectedRoom.latestReadingDate)}
                 </p>
+              )}
+              {registeredRoomNos.length > 0 && !editingRecord && (
+                <p className="text-xs text-slate-500">{formMonth} 已登记 {registeredRoomNos.length} 个房号，已登记房号不可重复选择。</p>
               )}
             </div>
 
@@ -375,12 +489,81 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
               <div className="space-y-2">
                 <Label>登记人</Label>
                 <Input
-                  value={form.recorderName}
-                  onChange={(event) => updateForm('recorderName', event.target.value)}
-                  placeholder="可留空"
+                  value={form.recorderName || '系统自动记录当前登录人'}
+                  disabled
                   className="h-11 rounded-2xl text-base"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Camera className="h-4 w-4 text-blue-600" />
+                水表照片
+              </Label>
+              {editingRecord?.photoUrl && !removePhoto && (
+                <a href={editingRecord.photoUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <img
+                    src={editingRecord.photoUrl}
+                    alt={editingRecord.photoName || '水表照片'}
+                    className="max-h-56 w-full rounded-2xl border border-slate-100 bg-slate-50 object-contain"
+                  />
+                </a>
+              )}
+              {editingRecord?.photoUrl && removePhoto && (
+                <p className="rounded-2xl bg-orange-50 px-3 py-2 text-xs text-orange-700">已选择删除原照片，保存后生效。</p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 active:bg-blue-100">
+                  <Camera className="h-4 w-4" />
+                  拍照上传
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="sr-only"
+                    onChange={(event) => {
+                      setPhotoFile(event.target.files?.[0] || null);
+                      setRemovePhoto(false);
+                    }}
+                  />
+                </label>
+                <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-medium text-slate-700 active:bg-slate-50">
+                  <Images className="h-4 w-4" />
+                  相册选择
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={(event) => {
+                      setPhotoFile(event.target.files?.[0] || null);
+                      setRemovePhoto(false);
+                    }}
+                  />
+                </label>
+              </div>
+              {photoFile && (
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <span className="min-w-0 truncate">已选择：{photoFile.name}</span>
+                  <button type="button" className="shrink-0 text-slate-500" onClick={() => setPhotoFile(null)} aria-label="移除照片">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              {editingRecord?.photoUrl && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-2xl border-orange-100 text-xs text-orange-700"
+                  onClick={() => {
+                    setRemovePhoto(true);
+                    setPhotoFile(null);
+                  }}
+                >
+                  删除原照片
+                </Button>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -395,9 +578,92 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
 
             <Button className="mobile-submit-button h-12 w-full rounded-[22px] text-base font-semibold" onClick={submitForm} disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
-              保存水表记录
+              {editingRecord ? '保存修改' : '保存水表记录'}
             </Button>
           </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={Boolean(detailRecord)} onOpenChange={(open) => !open && setDetailRecord(null)}>
+        <SheetContent side="bottom" className="max-h-[88dvh] overflow-y-auto rounded-t-[30px] p-0">
+          <SheetHeader className="border-b border-slate-100 px-4 py-4 text-left">
+            <SheetTitle>水表详情</SheetTitle>
+            <SheetDescription>{detailRecord ? `${detailRecord.roomNo} / ${formatDate(detailRecord.readingDate)}` : ''}</SheetDescription>
+          </SheetHeader>
+          {detailRecord && (
+            <div className="space-y-4 p-4">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">上次读数</div>
+                  <div className="mt-1 font-semibold text-slate-950">{display(detailRecord.previousReadingText)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">本次读数</div>
+                  <div className="mt-1 font-semibold text-slate-950">{display(detailRecord.currentReadingText)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">本次用量</div>
+                  <div className="mt-1 font-semibold text-slate-950">{display(detailRecord.usageAmount)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">水费金额</div>
+                  <div className="mt-1 font-semibold text-blue-600">{money(detailRecord.feeAmount)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">水费单价</div>
+                  <div className="mt-1 font-semibold text-slate-950">{display(detailRecord.unitPrice)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-xs text-slate-400">登记人</div>
+                  <div className="mt-1 font-semibold text-slate-950">{display(detailRecord.recorderName)}</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-semibold text-slate-950">水表照片</div>
+                {detailRecord.photoUrl ? (
+                  <a href={detailRecord.photoUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img
+                      src={detailRecord.photoUrl}
+                      alt={detailRecord.photoName || '水表照片'}
+                      className="max-h-[55vh] w-full rounded-2xl border border-slate-100 bg-slate-50 object-contain"
+                    />
+                  </a>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">暂无照片</div>
+                )}
+              </div>
+              {detailRecord.remark && (
+                <div className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">
+                  <div className="mb-1 text-xs text-slate-400">备注</div>
+                  {detailRecord.remark}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  className="h-11 rounded-2xl"
+                  onClick={() => {
+                    const record = detailRecord;
+                    setDetailRecord(null);
+                    openEditForm(record);
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  修改
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-2xl border-red-100 text-red-600"
+                  onClick={() => void deleteRecord(detailRecord)}
+                  disabled={deletingId === detailRecord.id}
+                >
+                  {deletingId === detailRecord.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  删除
+                </Button>
+              </div>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </div>

@@ -707,7 +707,10 @@ export function initDatabase(dbInstance: Database.Database) {
       usage_amount REAL,
       unit_price REAL,
       fee_amount REAL,
+      recorder_user_id INTEGER,
       recorder_name TEXT,
+      photo_url TEXT,
+      photo_name TEXT,
       remark TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -1389,6 +1392,15 @@ export function initDatabase(dbInstance: Database.Database) {
     }
     if (!waterMeterColumns.some(col => col.name === 'current_reading_text')) {
       dbInstance.exec('ALTER TABLE water_meter_records ADD COLUMN current_reading_text TEXT');
+    }
+    if (!waterMeterColumns.some(col => col.name === 'recorder_user_id')) {
+      dbInstance.exec('ALTER TABLE water_meter_records ADD COLUMN recorder_user_id INTEGER');
+    }
+    if (!waterMeterColumns.some(col => col.name === 'photo_url')) {
+      dbInstance.exec('ALTER TABLE water_meter_records ADD COLUMN photo_url TEXT');
+    }
+    if (!waterMeterColumns.some(col => col.name === 'photo_name')) {
+      dbInstance.exec('ALTER TABLE water_meter_records ADD COLUMN photo_name TEXT');
     }
   } catch (e) {
     // 忽略已有库迁移错误
