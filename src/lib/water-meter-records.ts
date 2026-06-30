@@ -1,4 +1,5 @@
 import type { WaterMeterRecord, WaterMeterRoomOption } from '@/types/water-meter';
+import { normalizeWaterMeterPhotoUrl } from '@/lib/water-meter-photos';
 
 export interface WaterMeterDbRow {
   id: number;
@@ -39,7 +40,7 @@ export function parseWaterMeterRow(row: WaterMeterDbRow): WaterMeterRecord {
     feeAmount: row.fee_amount,
     recorderUserId: row.recorder_user_id,
     recorderName: row.recorder_name,
-    photoUrl: row.photo_url,
+    photoUrl: normalizeWaterMeterPhotoUrl(row.photo_url),
     photoName: row.photo_name,
     remark: row.remark,
     createdAt: row.created_at,

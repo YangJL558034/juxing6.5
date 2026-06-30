@@ -3,15 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
-  Camera,
   CheckCircle2,
   Droplets,
   Gauge,
   Home,
-  Images,
   Loader2,
   UserRound,
-  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import type { WaterMeterRecord, WaterMeterRoomOption } from '@/types/water-meter';
 import { chinaToday } from '@/lib/china-time';
+import { WaterMeterPhotoPicker } from '@/components/water-meter/WaterMeterPhotoPicker';
 
 const today = chinaToday;
 
@@ -327,37 +325,7 @@ export default function WaterMeterPage() {
               </Field>
 
               <Field label="水表照片" icon={<Droplets className="h-4 w-4" />}>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 active:bg-blue-100">
-                    <Camera className="h-4 w-4" />
-                    拍照上传
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="sr-only"
-                      onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
-                    />
-                  </label>
-                  <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-sm font-medium text-slate-700 active:bg-slate-50">
-                    <Images className="h-4 w-4" />
-                    相册选择
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="sr-only"
-                      onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
-                    />
-                  </label>
-                </div>
-                {photoFile && (
-                  <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    <span className="min-w-0 truncate">已选择：{photoFile.name}</span>
-                    <button type="button" className="shrink-0 text-slate-500" onClick={() => setPhotoFile(null)} aria-label="移除照片">
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
+                <WaterMeterPhotoPicker photoFile={photoFile} onPhotoFileChange={setPhotoFile} roundedClassName="rounded-md" />
               </Field>
 
               <Field label="备注" icon={<Droplets className="h-4 w-4" />}>

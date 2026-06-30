@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Camera, Download, Droplets, Eye, Images, Loader2, Pencil, Plus, RefreshCcw, Save, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Camera, Download, Droplets, Eye, Loader2, Pencil, Plus, RefreshCcw, Save, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { WaterMeterRecord, WaterMeterRoomOption } from '@/types/water-meter';
 import { chinaCurrentMonth, chinaToday } from '@/lib/china-time';
 import { cn } from '@/lib/utils';
+import { WaterMeterPhotoPicker } from '@/components/water-meter/WaterMeterPhotoPicker';
 
 interface WaterMeterSummary {
   total: number;
@@ -513,43 +514,11 @@ export default function MobileWaterMeterManager({ onBack }: { onBack: () => void
               {editingRecord?.photoUrl && removePhoto && (
                 <p className="rounded-2xl bg-orange-50 px-3 py-2 text-xs text-orange-700">已选择删除原照片，保存后生效。</p>
               )}
-              <div className="grid grid-cols-2 gap-3">
-                <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 active:bg-blue-100">
-                  <Camera className="h-4 w-4" />
-                  拍照上传
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="sr-only"
-                    onChange={(event) => {
-                      setPhotoFile(event.target.files?.[0] || null);
-                      setRemovePhoto(false);
-                    }}
-                  />
-                </label>
-                <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-medium text-slate-700 active:bg-slate-50">
-                  <Images className="h-4 w-4" />
-                  相册选择
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={(event) => {
-                      setPhotoFile(event.target.files?.[0] || null);
-                      setRemovePhoto(false);
-                    }}
-                  />
-                </label>
-              </div>
-              {photoFile && (
-                <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                  <span className="min-w-0 truncate">已选择：{photoFile.name}</span>
-                  <button type="button" className="shrink-0 text-slate-500" onClick={() => setPhotoFile(null)} aria-label="移除照片">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+              <WaterMeterPhotoPicker
+                photoFile={photoFile}
+                onPhotoFileChange={setPhotoFile}
+                onPhotoSelected={() => setRemovePhoto(false)}
+              />
               {editingRecord?.photoUrl && (
                 <Button
                   type="button"

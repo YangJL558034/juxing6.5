@@ -4,11 +4,11 @@ import path from 'path';
 import { db } from '@/lib/database';
 import { verifyToken, type User } from '@/lib/auth';
 import { parseWaterMeterRow, round2, type WaterMeterDbRow } from '@/lib/water-meter-records';
+import { buildWaterMeterPhotoUrl, getWaterMeterPhotoCandidatePathsFromUrl, waterMeterUploadDir } from '@/lib/water-meter-photo-storage';
 
 export const runtime = 'nodejs';
 
 const DEFAULT_WATER_UNIT_PRICE = 6.48;
-const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'water-meter');
 
 interface WaterMeterInput {
   roomNo: string;
@@ -99,20 +99,19 @@ async function savePhoto(file: File) {
     throw new WaterMeterRequestError('Photo size cannot exceed 20MB.');
   }
 
-  await mkdir(uploadDir, { recursive: true });
+  await mkdir(waterMeterUploadDir, { recursive: true });
   const fileName = `water_meter_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-  const filePath = path.join(uploadDir, fileName);
+  const filePath = path.join(waterMeterUploadDir, fileName);
   await writeFile(filePath, Buffer.from(await file.arrayBuffer()));
   return {
-    photoUrl: `/uploads/water-meter/${fileName}`,
+    photoUrl: buildWaterMeterPhotoUrl(fileName),
     photoName: file.name || fileName,
   };
 }
 
 async function deleteUploadedPhoto(photoUrl?: string | null) {
-  if (!photoUrl || !photoUrl.startsWith('/uploads/water-meter/')) return;
-  const fileName = path.basename(photoUrl);
-  await unlink(path.join(uploadDir, fileName)).catch(() => undefined);
+  const filePaths = getWaterMeterPhotoCandidatePathsFromUrl(photoUrl);
+  await Promise.all(filePaths.map((filePath) => unlink(filePath).catch(() => undefined)));
 }
 
 async function parseInput(
